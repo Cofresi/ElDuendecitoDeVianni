@@ -1,6 +1,6 @@
 {
   "downloads_folder": "%USERPROFILE%\\Downloads",
-  "template_folder": "templates",
+  "template_folder": "plantillas",
   "output_folder": "output",
   "imported_folder": "imported_files",
   "logs_folder": "logs",

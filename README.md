@@ -33,7 +33,7 @@ py -3.12 -m venv .venv
 ## Estructura
 
 ```text
-templates/
+plantillas/
 imported_files/
 output/
 logs/
@@ -60,7 +60,7 @@ Desde la ventana de Configuracion se puede cambiar:
 
 ## Plantillas
 
-Coloque las plantillas en `templates`. Se procesan en orden alfabetico, por eso se recomienda nombrarlas asi:
+Coloque las plantillas en `plantillas`. Se procesan en orden alfabetico, por eso se recomienda nombrarlas asi:
 
 - `01_Contrato.docx`
 - `02_Formulario.xlsx`

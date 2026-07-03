@@ -10,6 +10,7 @@ config.json
 /logs/
 /imported_files/
 /output/
+/plantillas/
 /templates/
 
 *.log

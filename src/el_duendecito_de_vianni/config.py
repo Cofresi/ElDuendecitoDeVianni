@@ -28,7 +28,7 @@ class AppConfig:
     def default(cls, app_root: Path) -> "AppConfig":
         return cls(
             downloads_folder=str(Path.home() / "Downloads"),
-            template_folder=str(app_root / "templates"),
+            template_folder=str(app_root / "plantillas"),
             output_folder=str(app_root / "output"),
             imported_folder=str(app_root / "imported_files"),
             logs_folder=str(app_root / "logs"),
