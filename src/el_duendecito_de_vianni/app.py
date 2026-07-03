@@ -305,7 +305,7 @@ class MainWindow(QMainWindow):
         if not self.tray.isVisible():
             return
         if self.monitoring:
-            message = "El duendecito esta despierto y vigilando. Siempre chequeando si hay nuevos empleados."
+            message = "El duendecito esta despierto y vigilando. Siempre chequeando si hay nuevos empleados. Todo esta funcionando bien."
         else:
             message = "El duendecito esta listo en la bandeja. Puede iniciar el monitoreo cuando desee."
         self.tray.showMessage("El duendecito de Vianni", message, make_icon(), 6000)
