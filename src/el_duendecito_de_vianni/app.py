@@ -41,6 +41,16 @@ QMainWindow, QDialog {
     font-family: "Segoe UI";
     font-size: 10pt;
 }
+QDialog QLabel, QDialog QCheckBox {
+    color: #243325;
+    font-weight: 500;
+}
+QDialog#ConfigDialog {
+    background: #fff8e8;
+}
+QWidget#ConfigPathRow {
+    background: transparent;
+}
 QLabel#TitleLabel {
     color: #245236;
     font-size: 26px;
@@ -81,7 +91,39 @@ QLineEdit, QSpinBox, QComboBox {
     background: #fffdf7;
     border: 1px solid #cdbb8a;
     border-radius: 6px;
+    color: #1f2b20;
     padding: 6px;
+}
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+    border: 1px solid #4f7c43;
+    background: #ffffff;
+}
+QComboBox QAbstractItemView {
+    background: #fffdf7;
+    color: #1f2b20;
+    selection-background-color: #dfeecf;
+    selection-color: #1f2b20;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #8e7a4d;
+    border-radius: 3px;
+    background: #fffdf7;
+}
+QCheckBox::indicator:checked {
+    background: #315f3b;
+    border: 1px solid #214429;
+}
+QPushButton#PathButton {
+    background: #d6a540;
+    border: 1px solid #9b7426;
+    color: #243325;
+    min-width: 34px;
+    padding: 6px 8px;
+}
+QPushButton#PathButton:hover {
+    background: #e0b956;
 }
 QMenu {
     background: #fffaf0;
@@ -146,11 +188,15 @@ def make_icon() -> QIcon:
 class ConfigDialog(QDialog):
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
+        self.setObjectName("ConfigDialog")
         self.setWindowTitle("Configuracion")
         self.setWindowIcon(make_icon())
         self.setStyleSheet(APP_STYLESHEET)
         self.config = config
         layout = QFormLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setHorizontalSpacing(14)
+        layout.setVerticalSpacing(10)
         self.downloads = self._path_row(config.downloads_folder)
         self.templates = self._path_row(config.template_folder)
         self.output = self._path_row(config.output_folder)
@@ -185,10 +231,13 @@ class ConfigDialog(QDialog):
 
     def _path_row(self, value: str) -> QWidget:
         widget = QWidget()
+        widget.setObjectName("ConfigPathRow")
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
         edit = QLineEdit(value)
         button = QPushButton("...")
+        button.setObjectName("PathButton")
         button.clicked.connect(lambda: self._choose_folder(edit))
         layout.addWidget(edit)
         layout.addWidget(button)
@@ -305,9 +354,9 @@ class MainWindow(QMainWindow):
         if not self.tray.isVisible():
             return
         if self.monitoring:
-            message = "El duendecito esta despierto y vigilando. Siempre chequeando si hay nuevos empleados. Todo esta funcionando bien."
+            message = "Estoy despierto y vigilando. Siempre chequeando si hay nuevos empleados. Todo esta funcionando bien."
         else:
-            message = "El duendecito esta listo en la bandeja. Puede iniciar el monitoreo cuando desee."
+            message = "Estoy listo en la bandeja. Puede iniciar el monitoreo cuando desee."
         self.tray.showMessage("El duendecito de Vianni", message, make_icon(), 6000)
 
     def _sync_timer(self) -> None:
