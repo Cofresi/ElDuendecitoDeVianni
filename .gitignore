@@ -1,0 +1,15 @@
+.venv/
+build/
+dist/
+*.spec
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+config.json
+/logs/
+/imported_files/
+/output/
+/templates/
+
+*.log

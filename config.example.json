@@ -1,0 +1,13 @@
+{
+  "downloads_folder": "%USERPROFILE%\\Downloads",
+  "template_folder": "templates",
+  "output_folder": "output",
+  "imported_folder": "imported_files",
+  "logs_folder": "logs",
+  "scan_interval_minutes": 15,
+  "ask_before_delete_original": true,
+  "selected_printer": "",
+  "start_minimized_to_tray": true,
+  "start_with_windows": false,
+  "monitoring_enabled": true
+}
