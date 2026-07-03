@@ -12,7 +12,7 @@ from el_duendecito_de_vianni.processed_store import ProcessedStore, file_sha256
 from el_duendecito_de_vianni.processor import DocumentProcessor
 from el_duendecito_de_vianni.spreadsheet import read_employees
 from el_duendecito_de_vianni.templates import process_docx
-from el_duendecito_de_vianni.utils import employee_folder_name, sorted_templates
+from el_duendecito_de_vianni.utils import company_template_subfolder, employee_folder_name, sorted_templates
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -175,3 +175,51 @@ def test_print_order_sorting() -> None:
     folder = Path("unused")
     names = ["10_Final.docx", "02_Formulario.xlsx", "01_Contrato.docx"]
     assert sorted(names, key=lambda value: value.lower()) == ["01_Contrato.docx", "02_Formulario.xlsx", "10_Final.docx"]
+
+
+def test_company_template_routing_uses_ines_folder(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ines_folder = Path(config.template_folder) / "Ines"
+    brothers_folder = Path(config.template_folder) / "Brothers"
+    ines_folder.mkdir(parents=True)
+    brothers_folder.mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Compania": "Supermercado Ines"}],
+    )
+    make_docx(ines_folder / "01_Ines.docx", "Ines {{Nombre Empleado}}")
+    make_docx(brothers_folder / "01_Brothers.docx", "Brothers {{Nombre Empleado}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    assert report.document_count == 1
+    generated = Path(report.generated_documents[0])
+    assert generated.name == "01_Ines.docx"
+    assert "Ines ANA" in "\n".join(p.text for p in Document(generated).paragraphs)
+
+
+def test_company_template_routing_uses_brothers_for_other_companies(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ines_folder = Path(config.template_folder) / "Ines"
+    brothers_folder = Path(config.template_folder) / "Brothers"
+    ines_folder.mkdir(parents=True)
+    brothers_folder.mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 2, "Nombre Empleado": "LUIS", "Compania": "Otra Compania"}],
+    )
+    make_docx(ines_folder / "01_Ines.docx", "Ines {{Nombre Empleado}}")
+    make_docx(brothers_folder / "01_Brothers.docx", "Brothers {{Nombre Empleado}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    assert report.document_count == 1
+    generated = Path(report.generated_documents[0])
+    assert generated.name == "01_Brothers.docx"
+    assert "Brothers LUIS" in "\n".join(p.text for p in Document(generated).paragraphs)
+
+
+def test_company_template_subfolder_mapping() -> None:
+    assert company_template_subfolder({"Compania": "Supermercado Ines"}) == "Ines"
+    assert company_template_subfolder({"Compania": "Supermercado Inés"}) == "Brothers"
+    assert company_template_subfolder({"Compania": ""}) == "Brothers"

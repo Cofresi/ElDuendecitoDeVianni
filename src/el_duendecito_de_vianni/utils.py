@@ -21,6 +21,21 @@ def employee_folder_name(row: dict[str, str]) -> str:
     return safe_filename(f"{number} - {name}")
 
 
+def company_template_subfolder(row: dict[str, str]) -> str:
+    company = str(row.get("Compania", "")).strip()
+    if company.casefold() == "Supermercado Ines".casefold():
+        return "Ines"
+    return "Brothers"
+
+
+def template_folder_for_employee(base_folder: str | Path, row: dict[str, str]) -> Path:
+    base = Path(base_folder)
+    company_folder = base / company_template_subfolder(row)
+    if company_folder.exists():
+        return company_folder
+    return base
+
+
 def sorted_templates(template_folder: str | Path) -> list[Path]:
     supported = {".doc", ".docx", ".xls", ".xlsx"}
     folder = Path(template_folder)

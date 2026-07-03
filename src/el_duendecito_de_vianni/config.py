@@ -83,3 +83,5 @@ def ensure_directories(config: AppConfig) -> None:
         config.logs_folder,
     ):
         Path(folder).mkdir(parents=True, exist_ok=True)
+    for company_folder in ("Brothers", "Ines"):
+        (Path(config.template_folder) / company_folder).mkdir(parents=True, exist_ok=True)

@@ -34,6 +34,8 @@ py -3.12 -m venv .venv
 
 ```text
 plantillas/
+  Brothers/
+  Ines/
 imported_files/
 output/
 logs/
@@ -60,7 +62,14 @@ Desde la ventana de Configuracion se puede cambiar:
 
 ## Plantillas
 
-Coloque las plantillas en `plantillas`. Se procesan en orden alfabetico, por eso se recomienda nombrarlas asi:
+Coloque las plantillas en una de estas carpetas:
+
+- `plantillas/Brothers`
+- `plantillas/Ines`
+
+Cuando el campo `Compania` del exporte contiene exactamente `Supermercado Ines`, la aplicacion usa solo las plantillas de `plantillas/Ines`. Para cualquier otro valor de `Compania`, usa solo las plantillas de `plantillas/Brothers`.
+
+Dentro de cada carpeta, las plantillas se procesan en orden alfabetico, por eso se recomienda nombrarlas asi:
 
 - `01_Contrato.docx`
 - `02_Formulario.xlsx`

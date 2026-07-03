@@ -12,7 +12,7 @@ from .importer import find_export, import_export
 from .processed_store import ProcessedStore, file_sha256
 from .spreadsheet import read_employees
 from .templates import process_template_copy
-from .utils import employee_folder_name, safe_filename, sorted_templates
+from .utils import employee_folder_name, safe_filename, sorted_templates, template_folder_for_employee
 
 
 DR_TZ = ZoneInfo("America/Santo_Domingo")
@@ -68,11 +68,17 @@ class DocumentProcessor:
         temp_output.mkdir(parents=True, exist_ok=True)
 
         report = RunReport(imported_spreadsheet=str(spreadsheet), output_folder=str(final_output))
-        templates = sorted_templates(self.config.template_folder)
         try:
             for employee in employees:
                 employee_dir = temp_output / employee_folder_name(employee)
                 employee_dir.mkdir(parents=True, exist_ok=True)
+                template_folder = template_folder_for_employee(self.config.template_folder, employee)
+                templates = sorted_templates(template_folder)
+                logging.info(
+                    "Usando plantillas de %s para %s",
+                    template_folder,
+                    employee.get("Nombre Empleado", "empleado sin nombre"),
+                )
                 for template in templates:
                     destination = employee_dir / safe_filename(template.name)
                     result = process_template_copy(template, destination, employee)
