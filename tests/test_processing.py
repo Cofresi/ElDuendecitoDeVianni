@@ -177,6 +177,14 @@ def test_print_order_sorting() -> None:
     assert sorted(names, key=lambda value: value.lower()) == ["01_Contrato.docx", "02_Formulario.xlsx", "10_Final.docx"]
 
 
+def test_template_sorting_ignores_office_lock_files(tmp_path: Path) -> None:
+    make_docx(tmp_path / "01_Contrato.docx", "Contrato")
+    (tmp_path / "~$01_Contrato.docx").write_text("office lock", encoding="utf-8")
+    (tmp_path / "~$02_Formulario.xlsx").write_text("office lock", encoding="utf-8")
+
+    assert [path.name for path in sorted_templates(tmp_path)] == ["01_Contrato.docx"]
+
+
 def test_company_template_routing_uses_ines_folder(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     ines_folder = Path(config.template_folder) / "Ines"

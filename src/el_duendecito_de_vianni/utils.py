@@ -42,6 +42,12 @@ def sorted_templates(template_folder: str | Path) -> list[Path]:
     if not folder.exists():
         return []
     return sorted(
-        (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in supported),
+        (
+            p
+            for p in folder.iterdir()
+            if p.is_file()
+            and p.suffix.lower() in supported
+            and not p.name.startswith("~$")
+        ),
         key=lambda p: p.name.lower(),
     )
