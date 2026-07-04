@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtCore import QLockFile, QPoint, QStandardPaths, QTimer, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -64,14 +64,17 @@ QLabel#StatusCard, QLabel#PathCard {
     background: #fffaf0;
     border: 1px solid #d9c99f;
     border-radius: 8px;
+    color: #243325;
     padding: 12px;
 }
 QTextEdit {
     background: #fffdf7;
     border: 1px solid #cdbb8a;
     border-radius: 8px;
+    color: #243325;
     padding: 8px;
     selection-background-color: #5b8c48;
+    selection-color: #ffffff;
 }
 QPushButton {
     background: #315f3b;
@@ -486,8 +489,24 @@ def main() -> int:
     ensure_directories(config)
     log_path = configure_logging(config.logs_folder)
     app = QApplication(sys.argv)
+    app.setApplicationName("ElDuendecitoDeVianni")
+    app.setOrganizationName("Vianni")
     app.setWindowIcon(make_icon())
     app.setQuitOnLastWindowClosed(False)
+
+    lock_folder = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
+    lock_folder.mkdir(parents=True, exist_ok=True)
+    lock_file = QLockFile(str(lock_folder / "ElDuendecitoDeVianni.lock"))
+    lock_file.setStaleLockTime(30_000)
+    if not lock_file.tryLock(100):
+        QMessageBox.information(
+            None,
+            "El duendecito ya esta despierto",
+            "Ya hay un duendecito de Vianni trabajando en este equipo.",
+        )
+        return 0
+    app.instance_lock = lock_file  # type: ignore[attr-defined]
+
     window = MainWindow(config, log_path)
     if config.start_minimized_to_tray:
         window.hide()
