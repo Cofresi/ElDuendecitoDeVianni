@@ -56,11 +56,20 @@ Desde la ventana de Configuracion se puede cambiar:
 - Carpeta de plantillas
 - Carpeta de salida
 - Tabla de horarios
+- Direccion, usuario y modo visible/invisible para Mercury
 - Intervalo de escaneo
 - Confirmacion antes de borrar el archivo descargado
 - Impresora
 - Inicio minimizado en bandeja
 - Inicio automatico con Windows
+
+La contrasena de Mercury no se guarda en `config.json`. Se guarda en el Administrador de credenciales de Windows y se puede reemplazar desde Configuracion escribiendo una nueva contrasena, sin pedir la anterior.
+
+## Mercury
+
+La primera integracion de Mercury permite configurar la direccion, el usuario, la contrasena y si Playwright debe abrir el navegador visible o invisible. El boton `Mercury` prueba la entrada al sitio y prepara el camino para automatizar despues la descarga del exporte y las fotos.
+
+Para completar el flujo real de descarga se necesitaran los pasos exactos dentro de Mercury: pantalla inicial, botones o enlaces para exportar `GridViewExport.xlsx`, y la regla para descargar o nombrar las fotos.
 
 ## Plantillas
 

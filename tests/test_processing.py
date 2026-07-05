@@ -20,6 +20,7 @@ from el_duendecito_de_vianni.work_schedule import (
     add_work_schedule_sentence,
     build_work_schedule_sentence,
 )
+from el_duendecito_de_vianni.mercury import MercuryAutomationError, run_mercury_login_test
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -30,6 +31,9 @@ def make_config(tmp_path: Path) -> AppConfig:
         imported_folder=str(tmp_path / "imported_files"),
         logs_folder=str(tmp_path / "logs"),
         work_schedule_lookup=str(tmp_path / "politica_horario.xlsx"),
+        mercury_url="",
+        mercury_username="",
+        mercury_headless=False,
     )
 
 
@@ -116,6 +120,17 @@ def test_blank_excel_cells_become_blank_text(tmp_path: Path) -> None:
 
     assert rows[0]["Nombre Empleado"] == ""
     assert rows[0]["Telefono1"] == ""
+
+
+def test_mercury_requires_configured_url(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+
+    try:
+        run_mercury_login_test(config, "secret")
+    except MercuryAutomationError as exc:
+        assert "direccion de Mercury" in str(exc)
+    else:
+        raise AssertionError("Expected MercuryAutomationError")
 
 
 def test_missing_placeholder_is_left_and_reported(tmp_path: Path) -> None:
