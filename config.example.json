@@ -4,6 +4,7 @@
   "output_folder": "output",
   "imported_folder": "imported_files",
   "logs_folder": "logs",
+  "work_schedule_lookup": "politica_horario.xlsx",
   "scan_interval_minutes": 15,
   "ask_before_delete_original": true,
   "selected_printer": "",

@@ -40,6 +40,7 @@ imported_files/
 output/
 logs/
 config.json
+politica_horario.xlsx
 demo/
 src/
 tests/
@@ -54,6 +55,7 @@ Desde la ventana de Configuracion se puede cambiar:
 - Carpeta de Descargas
 - Carpeta de plantillas
 - Carpeta de salida
+- Tabla de horarios
 - Intervalo de escaneo
 - Confirmacion antes de borrar el archivo descargado
 - Impresora
@@ -98,6 +100,16 @@ Estimad{{Sexo|genero_plural}} -> Estimadas / Estimados
 ```
 
 Los formatos disponibles son `money`, `int`, `date`, `tratamiento`, `genero` y `genero_plural`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. `genero` genera `a` u `o`, y `genero_plural` genera `as` u `os`. Si no se indica formato, el valor se inserta como texto normal.
+
+### Horario laboral
+
+Para construir la frase de politica de horario, coloque la tabla configurable en `politica_horario.xlsx` o seleccione otro archivo desde Configuracion. La aplicacion busca el valor del campo `Política Horario` en la columna `horario1 (de GridViewExport.xls)` y genera el campo:
+
+```text
+{{Horario Laboral}}
+```
+
+La tabla debe incluir las columnas `horario1 (de GridViewExport.xls)`, `horario2`, `dias`, `break` y `feriados`. Si `dias` es `5`, se genera una frase de lunes a viernes y sabado. Si `dias` es `6`, se genera una frase de lunes a sabado, domingo y un dia libre semanal. Cuando `feriados` es `1`, se agrega que el horario incluye dias feriados; cuando es `0`, esa parte se omite.
 
 ## Formatos soportados
 

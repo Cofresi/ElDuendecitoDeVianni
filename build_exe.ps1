@@ -17,4 +17,8 @@ if (-not (Test-Path ".venv")) {
     --add-data "config.example.json;." `
     launcher.py
 
+if (Test-Path "politica_horario.xlsx") {
+    Copy-Item "politica_horario.xlsx" "dist\politica_horario.xlsx" -Force
+}
+
 Write-Host "Executable generated at dist\ElDuendecitoDeVianni.exe"

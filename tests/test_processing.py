@@ -13,6 +13,13 @@ from el_duendecito_de_vianni.processor import DocumentProcessor
 from el_duendecito_de_vianni.spreadsheet import read_employees
 from el_duendecito_de_vianni.templates import process_docx, replace_placeholders
 from el_duendecito_de_vianni.utils import company_template_subfolder, employee_folder_name, sorted_templates
+from el_duendecito_de_vianni.work_schedule import (
+    DERIVED_FIELD,
+    SchedulePolicy,
+    WorkScheduleLookup,
+    add_work_schedule_sentence,
+    build_work_schedule_sentence,
+)
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -22,6 +29,7 @@ def make_config(tmp_path: Path) -> AppConfig:
         output_folder=str(tmp_path / "output"),
         imported_folder=str(tmp_path / "imported_files"),
         logs_folder=str(tmp_path / "logs"),
+        work_schedule_lookup=str(tmp_path / "politica_horario.xlsx"),
     )
 
 
@@ -39,6 +47,15 @@ def make_docx(path: Path, text: str) -> None:
     document = Document()
     document.add_paragraph(text)
     document.save(path)
+
+
+def make_schedule_lookup(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["horario1 (de GridViewExport.xls)", "horario2", "dias", "break", "feriados"])
+    sheet.append(["02:30 PM A 10:30 PM", "01:30 PM A 8:30 PM", 6, 20, 1])
+    sheet.append(["07:00 AM A 03:00 PM", "08:00 AM A 02:00 PM", 5, None, 0])
+    workbook.save(path)
 
 
 def test_one_employee_and_one_docx_template(tmp_path: Path) -> None:
@@ -166,6 +183,59 @@ def test_genero_ending_filters() -> None:
     assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": ""}, set()) == "Estimad"
 
 
+def test_work_schedule_sentence_for_six_day_policy() -> None:
+    sentence = build_work_schedule_sentence(
+        SchedulePolicy(
+            horario1="02:30 PM A 10:30 PM",
+            horario2="01:30 PM A 8:30 PM",
+            days=6,
+            break_minutes=20,
+            holidays=True,
+        )
+    )
+
+    assert (
+        sentence
+        == "Lunes a Sábados de 2:30 pm a 10:30 pm y Domingo de 1:30 pm a 8:30 pm, "
+        "con 20 minutos de break y un día libre a la semana según programación, "
+        "este horario incluye los días feriados."
+    )
+
+
+def test_work_schedule_sentence_omits_holidays_when_disabled() -> None:
+    sentence = build_work_schedule_sentence(
+        SchedulePolicy(
+            horario1="07:00 AM A 03:00 PM",
+            horario2="08:00 AM A 02:00 PM",
+            days=5,
+            break_minutes=None,
+            holidays=False,
+        )
+    )
+
+    assert sentence == "Lunes a Viernes de 7:00 am a 3:00 pm y Sábado de 8:00 am a 2:00 pm."
+
+
+def test_work_schedule_lookup_enriches_employee(tmp_path: Path) -> None:
+    lookup_path = tmp_path / "politica_horario.xlsx"
+    make_schedule_lookup(lookup_path)
+    employee = {"Política Horario": "02:30 PM A 10:30 PM"}
+
+    add_work_schedule_sentence(employee, WorkScheduleLookup.from_file(lookup_path))
+
+    assert employee[DERIVED_FIELD].startswith("Lunes a Sábados de 2:30 pm")
+
+
+def test_unknown_work_schedule_policy_becomes_blank(tmp_path: Path) -> None:
+    lookup_path = tmp_path / "politica_horario.xlsx"
+    make_schedule_lookup(lookup_path)
+    employee = {"Política Horario": "No existe"}
+
+    add_work_schedule_sentence(employee, WorkScheduleLookup.from_file(lookup_path))
+
+    assert employee[DERIVED_FIELD] == ""
+
+
 def test_docx_template_money_filter(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     Path(config.template_folder).mkdir(parents=True)
@@ -194,6 +264,22 @@ def test_docx_template_tratamiento_filter(tmp_path: Path) -> None:
 
     text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
     assert "Sra. ANA" in text
+
+
+def test_docx_template_work_schedule_field(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    Path(config.template_folder).mkdir(parents=True)
+    make_schedule_lookup(Path(config.work_schedule_lookup))
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Política Horario": "02:30 PM A 10:30 PM"}],
+    )
+    make_docx(Path(config.template_folder) / "01_Carta.docx", "{{Horario Laboral}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
+    assert "Lunes a Sábados de 2:30 pm a 10:30 pm" in text
 
 
 def test_xlsx_template_preserves_formula_and_formatting(tmp_path: Path) -> None:

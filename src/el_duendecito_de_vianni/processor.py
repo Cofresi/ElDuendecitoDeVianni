@@ -13,6 +13,7 @@ from .processed_store import ProcessedStore, file_sha256
 from .spreadsheet import read_employees
 from .templates import process_template_copy
 from .utils import employee_folder_name, safe_filename, sorted_templates, template_folder_for_employee
+from .work_schedule import WorkScheduleLookup, add_work_schedule_sentence
 
 
 DR_TZ = ZoneInfo("America/Santo_Domingo")
@@ -39,6 +40,7 @@ class DocumentProcessor:
     def __init__(self, config: AppConfig):
         self.config = config
         self.store = ProcessedStore(Path(config.imported_folder) / "processed_files.json")
+        self.work_schedule_lookup = WorkScheduleLookup.from_file(config.work_schedule_lookup)
 
     def process_next_export(self, force: bool = False, delete_original: bool = True) -> RunReport:
         source = find_export(self.config.downloads_folder)
@@ -70,6 +72,7 @@ class DocumentProcessor:
         report = RunReport(imported_spreadsheet=str(spreadsheet), output_folder=str(final_output))
         try:
             for employee in employees:
+                add_work_schedule_sentence(employee, self.work_schedule_lookup)
                 employee_dir = temp_output / employee_folder_name(employee)
                 employee_dir.mkdir(parents=True, exist_ok=True)
                 template_folder = template_folder_for_employee(self.config.template_folder, employee)
