@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import re
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,7 +39,7 @@ def run_mercury_login_test(config: AppConfig, password: str) -> MercuryRunResult
     downloads.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=config.mercury_headless)
+        browser = playwright.chromium.launch(headless=config.mercury_headless, **_browser_launch_options())
         context = browser.new_context(accept_downloads=True)
         page = context.new_page()
         try:
@@ -98,3 +98,27 @@ def _first_visible(page, selectors: list[str], required: bool = True):
         names = ", ".join(selectors)
         raise MercuryAutomationError(f"No se encontro un campo esperado en Mercury: {names}")
     return None
+
+
+def _browser_launch_options() -> dict[str, str]:
+    executable_path = _find_playwright_chromium()
+    if executable_path:
+        return {"executable_path": str(executable_path)}
+    return {}
+
+
+def _find_playwright_chromium() -> Path | None:
+    override = os.getenv("EL_DUENDECITO_CHROMIUM_EXE")
+    if override and Path(override).exists():
+        return Path(override)
+
+    local_app_data = os.getenv("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+
+    browser_root = Path(local_app_data) / "ms-playwright"
+    if not browser_root.exists():
+        return None
+
+    matches = sorted(browser_root.glob("chromium-*/chrome-win64/chrome.exe"), reverse=True)
+    return matches[0] if matches else None

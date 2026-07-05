@@ -21,6 +21,7 @@ from el_duendecito_de_vianni.work_schedule import (
     build_work_schedule_sentence,
 )
 from el_duendecito_de_vianni.mercury import MercuryAutomationError, run_mercury_login_test
+from el_duendecito_de_vianni.mercury import _find_playwright_chromium
 from el_duendecito_de_vianni.credentials import delete_mercury_password, load_mercury_password, save_mercury_password
 
 
@@ -145,6 +146,16 @@ def test_mercury_requires_saved_password(tmp_path: Path) -> None:
         assert "contrasena de Mercury" in str(exc)
     else:
         raise AssertionError("Expected MercuryAutomationError")
+
+
+def test_find_playwright_chromium_from_local_app_data(tmp_path: Path, monkeypatch) -> None:
+    chrome = tmp_path / "ms-playwright" / "chromium-1228" / "chrome-win64" / "chrome.exe"
+    chrome.parent.mkdir(parents=True)
+    chrome.write_text("fake browser", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("EL_DUENDECITO_CHROMIUM_EXE", raising=False)
+
+    assert _find_playwright_chromium() == chrome
 
 
 def test_mercury_password_round_trip(tmp_path: Path, monkeypatch) -> None:
