@@ -11,7 +11,7 @@ from el_duendecito_de_vianni.importer import import_export
 from el_duendecito_de_vianni.processed_store import ProcessedStore, file_sha256
 from el_duendecito_de_vianni.processor import DocumentProcessor
 from el_duendecito_de_vianni.spreadsheet import read_employees
-from el_duendecito_de_vianni.templates import process_docx
+from el_duendecito_de_vianni.templates import process_docx, replace_placeholders
 from el_duendecito_de_vianni.utils import company_template_subfolder, employee_folder_name, sorted_templates
 
 
@@ -130,6 +130,40 @@ def test_placeholder_split_across_word_runs(tmp_path: Path) -> None:
     assert not missing
 
 
+def test_placeholder_format_filters() -> None:
+    missing: set[str] = set()
+    values = {
+        "Salario Base": "18800",
+        "Numero": "295.0",
+        "Fecha Ingreso": "2026-07-04",
+        "Nombre Empleado": "ANA",
+    }
+
+    rendered = replace_placeholders(
+        "{{Salario Base|money}} {{Numero|int}} {{Fecha Ingreso|date}} {{Nombre Empleado}}",
+        values,
+        missing,
+    )
+
+    assert rendered == "18,800.00 295 04/07/2026 ANA"
+    assert not missing
+
+
+def test_docx_template_money_filter(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    Path(config.template_folder).mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Salario Base": 18800}],
+    )
+    make_docx(Path(config.template_folder) / "01_Contrato.docx", "Salario: {{Salario Base|money}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
+    assert "Salario: 18,800.00" in text
+
+
 def test_xlsx_template_preserves_formula_and_formatting(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     Path(config.template_folder).mkdir(parents=True)
@@ -150,6 +184,27 @@ def test_xlsx_template_preserves_formula_and_formatting(tmp_path: Path) -> None:
     assert generated.active["A1"].value == "ANA"
     assert generated.active["A1"].font.bold
     assert generated.active["B1"].value == "=1+1"
+
+
+def test_xlsx_template_format_filters(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    Path(config.template_folder).mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 295, "Nombre Empleado": "ANA", "Salario Base": 18800}],
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "{{Salario Base|money}}"
+    sheet["A2"] = "{{Numero|int}}"
+    template = Path(config.template_folder) / "01_Formulario.xlsx"
+    workbook.save(template)
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+    generated = load_workbook(report.generated_documents[0])
+
+    assert generated.active["A1"].value == "18,800.00"
+    assert generated.active["A2"].value == "295"
 
 
 def test_duplicate_input_export_detection(tmp_path: Path) -> None:

@@ -86,6 +86,16 @@ Los marcadores usan este formato:
 
 El texto dentro de `{{ }}` debe coincidir exactamente con el encabezado de la columna en Excel, incluyendo espacios, mayusculas y acentos.
 
+Tambien puede aplicar formatos simples agregando `|formato` al marcador:
+
+```text
+{{Salario Base|money}}      -> 18,800.00
+{{Numero|int}}              -> 295
+{{Fecha Ingreso|date}}      -> 04/07/2026
+```
+
+Los formatos disponibles son `money`, `int` y `date`. Si no se indica formato, el valor se inserta como texto normal.
+
 ## Formatos soportados
 
 - Exportes de empleados: `.xlsx` y `.xls`

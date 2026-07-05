@@ -4,6 +4,8 @@ import logging
 import re
 import shutil
 from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from docx import Document
@@ -23,13 +25,68 @@ def placeholders_in_text(text: str) -> set[str]:
     return set(PLACEHOLDER_RE.findall(text or ""))
 
 
+def _parse_placeholder(placeholder: str) -> tuple[str, str]:
+    key, separator, formatter = placeholder.partition("|")
+    return key.strip(), formatter.strip().casefold() if separator else ""
+
+
+def _decimal_from_text(value: str) -> Decimal | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    cleaned = text.replace(",", "")
+    try:
+        return Decimal(cleaned)
+    except InvalidOperation:
+        return None
+
+
+def _format_money(value: str) -> str:
+    number = _decimal_from_text(value)
+    if number is None:
+        return ""
+    return f"{number:,.2f}"
+
+
+def _format_int(value: str) -> str:
+    number = _decimal_from_text(value)
+    if number is None:
+        return ""
+    return str(int(number))
+
+
+def _format_date(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for pattern in ("%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, pattern).strftime("%d/%m/%Y")
+        except ValueError:
+            continue
+    return text
+
+
+def _format_placeholder_value(value: str, formatter: str) -> str:
+    if not formatter:
+        return value
+    if formatter == "money":
+        return _format_money(value)
+    if formatter == "int":
+        return _format_int(value)
+    if formatter == "date":
+        return _format_date(value)
+    logging.warning("Formato de marcador desconocido: %s", formatter)
+    return value
+
+
 def replace_placeholders(text: str, values: dict[str, str], missing: set[str]) -> str:
     def repl(match: re.Match[str]) -> str:
-        key = match.group(1)
+        key, formatter = _parse_placeholder(match.group(1))
         if key not in values:
             missing.add(key)
             return match.group(0)
-        return values.get(key, "")
+        return _format_placeholder_value(values.get(key, ""), formatter)
 
     return PLACEHOLDER_RE.sub(repl, text or "")
 
