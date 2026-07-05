@@ -29,7 +29,9 @@ from PySide6.QtWidgets import (
 )
 
 from .config import AppConfig, ensure_directories, get_app_root, load_config, save_config
+from .credentials import has_mercury_password, load_mercury_password, save_mercury_password
 from .logging_utils import configure_logging
+from .mercury import MercuryAutomationError, run_mercury_export
 from .office import open_folder, print_file, set_start_with_windows
 from .processor import DocumentProcessor, RunReport
 
@@ -204,6 +206,18 @@ class ConfigDialog(QDialog):
         self.templates = self._path_row(config.template_folder)
         self.output = self._path_row(config.output_folder)
         self.work_schedule_lookup = self._file_row(config.work_schedule_lookup)
+        self.mercury_url = QLineEdit(config.mercury_url)
+        self.mercury_username = QLineEdit(config.mercury_username)
+        self.mercury_company = QLineEdit(config.mercury_company)
+        self.mercury_report_name = QLineEdit(config.mercury_report_name)
+        self.mercury_password = QLineEdit()
+        self.mercury_password.setEchoMode(QLineEdit.EchoMode.Password)
+        if has_mercury_password():
+            self.mercury_password.setPlaceholderText("Contrasena guardada; escriba una nueva para cambiarla")
+        else:
+            self.mercury_password.setPlaceholderText("Contrasena de Mercury")
+        self.mercury_headless = QCheckBox("Ejecutar Mercury invisible")
+        self.mercury_headless.setChecked(config.mercury_headless)
         self.interval = QSpinBox()
         self.interval.setRange(1, 1440)
         self.interval.setValue(config.scan_interval_minutes)
@@ -220,6 +234,12 @@ class ConfigDialog(QDialog):
         layout.addRow("Carpeta de plantillas", self.templates)
         layout.addRow("Carpeta de salida", self.output)
         layout.addRow("Tabla de horarios", self.work_schedule_lookup)
+        layout.addRow("Mercury URL", self.mercury_url)
+        layout.addRow("Usuario Mercury", self.mercury_username)
+        layout.addRow("Compania Mercury", self.mercury_company)
+        layout.addRow("Reporte Mercury", self.mercury_report_name)
+        layout.addRow("Contrasena Mercury", self.mercury_password)
+        layout.addRow(self.mercury_headless)
         layout.addRow("Intervalo (minutos)", self.interval)
         layout.addRow("Impresora", self.printer)
         layout.addRow(self.ask_delete)
@@ -287,6 +307,11 @@ class ConfigDialog(QDialog):
             imported_folder=self.config.imported_folder,
             logs_folder=self.config.logs_folder,
             work_schedule_lookup=self.work_schedule_lookup.edit.text(),  # type: ignore[attr-defined]
+            mercury_url=self.mercury_url.text(),
+            mercury_username=self.mercury_username.text(),
+            mercury_company=self.mercury_company.text(),
+            mercury_report_name=self.mercury_report_name.text(),
+            mercury_headless=self.mercury_headless.isChecked(),
             scan_interval_minutes=self.interval.value(),
             ask_before_delete_original=self.ask_delete.isChecked(),
             selected_printer=self.printer.currentText(),
@@ -341,6 +366,7 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         for text, callback in (
             ("Procesar ahora", self.scan_now),
+            ("Mercury", self.run_mercury),
             ("Plantillas", lambda: open_folder(self.config.template_folder)),
             ("Salida", lambda: open_folder(self.config.output_folder)),
             ("Configuracion", self.open_config),
@@ -362,6 +388,7 @@ class MainWindow(QMainWindow):
         actions = [
             ("Abrir El duendecito de Vianni", self.show_window),
             ("Procesar ahora", self.scan_now),
+            ("Mercury", self.run_mercury),
             ("Iniciar monitoreo", self.start_monitoring),
             ("Detener monitoreo", self.stop_monitoring),
             ("Abrir carpeta de salida", lambda: open_folder(self.config.output_folder)),
@@ -465,8 +492,21 @@ class MainWindow(QMainWindow):
     def open_config(self) -> None:
         dialog = ConfigDialog(self.config, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_mercury_password = dialog.mercury_password.text()
             self.config = dialog.updated_config()
             save_config(self.config, get_app_root())
+            if new_mercury_password:
+                try:
+                    save_mercury_password(new_mercury_password)
+                except Exception as exc:
+                    QMessageBox.warning(
+                        self,
+                        "Contrasena Mercury",
+                        f"No se pudo guardar la contrasena de Mercury.\n\n{exc}",
+                    )
+                    logging.exception("No se pudo guardar la contrasena de Mercury")
+                else:
+                    self.append_log("Contrasena de Mercury guardada en Windows.")
             set_start_with_windows(self.config.start_with_windows)
             ensure_directories(self.config)
             self.processor = DocumentProcessor(self.config)
@@ -477,6 +517,26 @@ class MainWindow(QMainWindow):
     def open_log(self) -> None:
         if os.name == "nt":
             os.startfile(self.log_path)  # type: ignore[attr-defined]
+
+    def run_mercury(self) -> None:
+        self.append_log("El duendecito esta buscando el reporte en Mercury...")
+        try:
+            result = run_mercury_export(self.config, load_mercury_password())
+            self.append_log(result.message)
+            report = self.processor.process_export_file(
+                result.downloaded_file,
+                force=True,
+                delete_original=not self.config.ask_before_delete_original,
+            )
+        except MercuryAutomationError as exc:
+            QMessageBox.warning(self, "Mercury necesita configuracion", str(exc))
+            self.append_log(str(exc))
+            return
+        except Exception as exc:
+            logging.exception("Error al usar Mercury")
+            QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
+            return
+        self.handle_report(report)
 
     def start_monitoring(self) -> None:
         self.monitoring = True

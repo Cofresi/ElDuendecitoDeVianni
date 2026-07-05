@@ -20,6 +20,9 @@ from el_duendecito_de_vianni.work_schedule import (
     add_work_schedule_sentence,
     build_work_schedule_sentence,
 )
+from el_duendecito_de_vianni.mercury import MercuryAutomationError, _report_generator_url, run_mercury_login_test
+from el_duendecito_de_vianni.mercury import _find_playwright_chromium
+from el_duendecito_de_vianni.credentials import delete_mercury_password, load_mercury_password, save_mercury_password
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -30,6 +33,11 @@ def make_config(tmp_path: Path) -> AppConfig:
         imported_folder=str(tmp_path / "imported_files"),
         logs_folder=str(tmp_path / "logs"),
         work_schedule_lookup=str(tmp_path / "politica_horario.xlsx"),
+        mercury_url="",
+        mercury_username="",
+        mercury_company="Supermercado Ines",
+        mercury_report_name="EntradasDeHoyTest",
+        mercury_headless=False,
     )
 
 
@@ -116,6 +124,57 @@ def test_blank_excel_cells_become_blank_text(tmp_path: Path) -> None:
 
     assert rows[0]["Nombre Empleado"] == ""
     assert rows[0]["Telefono1"] == ""
+
+
+def test_mercury_requires_configured_url(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+
+    try:
+        run_mercury_login_test(config, "secret")
+    except MercuryAutomationError as exc:
+        assert "direccion de Mercury" in str(exc)
+    else:
+        raise AssertionError("Expected MercuryAutomationError")
+
+
+def test_mercury_requires_saved_password(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.mercury_url = "https://example.test"
+    config.mercury_username = "usuario"
+
+    try:
+        run_mercury_login_test(config, "")
+    except MercuryAutomationError as exc:
+        assert "contrasena de Mercury" in str(exc)
+    else:
+        raise AssertionError("Expected MercuryAutomationError")
+
+
+def test_find_playwright_chromium_from_local_app_data(tmp_path: Path, monkeypatch) -> None:
+    chrome = tmp_path / "ms-playwright" / "chromium-1228" / "chrome-win64" / "chrome.exe"
+    chrome.parent.mkdir(parents=True)
+    chrome.write_text("fake browser", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("EL_DUENDECITO_CHROMIUM_EXE", raising=False)
+
+    assert _find_playwright_chromium() == chrome
+
+
+def test_report_generator_url_uses_mercury_host() -> None:
+    assert (
+        _report_generator_url("http://192.168.1.3/Mercury.Menu/Management.aspx?id=abc")
+        == "http://192.168.1.3/Mercury.RRHH/GeneradorReportes.aspx"
+    )
+
+
+def test_mercury_password_round_trip(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("EL_DUENDECITO_CREDENTIAL_DIR", str(tmp_path))
+
+    save_mercury_password("clave-secreta")
+
+    assert load_mercury_password() == "clave-secreta"
+    delete_mercury_password()
+    assert load_mercury_password() == ""
 
 
 def test_missing_placeholder_is_left_and_reported(tmp_path: Path) -> None:

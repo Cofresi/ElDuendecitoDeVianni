@@ -18,6 +18,11 @@ class AppConfig:
     imported_folder: str
     logs_folder: str
     work_schedule_lookup: str
+    mercury_url: str = ""
+    mercury_username: str = ""
+    mercury_company: str = "Supermercado Ines"
+    mercury_report_name: str = "EntradasDeHoyTest"
+    mercury_headless: bool = False
     scan_interval_minutes: int = 15
     ask_before_delete_original: bool = True
     selected_printer: str = ""
