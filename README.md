@@ -93,9 +93,11 @@ Tambien puede aplicar formatos simples agregando `|formato` al marcador:
 {{Numero|int}}              -> 295
 {{Fecha Ingreso|date}}      -> 04/07/2026
 {{Sexo|tratamiento}}        -> Sra. / Sr.
+Estimad{{Sexo|genero}}      -> Estimada / Estimado
+Estimad{{Sexo|genero_plural}} -> Estimadas / Estimados
 ```
 
-Los formatos disponibles son `money`, `int`, `date` y `tratamiento`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. Si no se indica formato, el valor se inserta como texto normal.
+Los formatos disponibles son `money`, `int`, `date`, `tratamiento`, `genero` y `genero_plural`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. `genero` genera `a` u `o`, y `genero_plural` genera `as` u `os`. Si no se indica formato, el valor se inserta como texto normal.
 
 ## Formatos soportados
 
