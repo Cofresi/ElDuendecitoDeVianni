@@ -203,6 +203,7 @@ class ConfigDialog(QDialog):
         self.downloads = self._path_row(config.downloads_folder)
         self.templates = self._path_row(config.template_folder)
         self.output = self._path_row(config.output_folder)
+        self.work_schedule_lookup = self._file_row(config.work_schedule_lookup)
         self.interval = QSpinBox()
         self.interval.setRange(1, 1440)
         self.interval.setValue(config.scan_interval_minutes)
@@ -218,6 +219,7 @@ class ConfigDialog(QDialog):
         layout.addRow("Carpeta de Descargas", self.downloads)
         layout.addRow("Carpeta de plantillas", self.templates)
         layout.addRow("Carpeta de salida", self.output)
+        layout.addRow("Tabla de horarios", self.work_schedule_lookup)
         layout.addRow("Intervalo (minutos)", self.interval)
         layout.addRow("Impresora", self.printer)
         layout.addRow(self.ask_delete)
@@ -252,6 +254,31 @@ class ConfigDialog(QDialog):
         if folder:
             edit.setText(folder)
 
+    def _file_row(self, value: str) -> QWidget:
+        widget = QWidget()
+        widget.setObjectName("ConfigPathRow")
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        edit = QLineEdit(value)
+        button = QPushButton("...")
+        button.setObjectName("PathButton")
+        button.clicked.connect(lambda: self._choose_file(edit))
+        layout.addWidget(edit)
+        layout.addWidget(button)
+        widget.edit = edit  # type: ignore[attr-defined]
+        return widget
+
+    def _choose_file(self, edit: QLineEdit) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar tabla de horarios",
+            edit.text(),
+            "Excel (*.xlsx *.xlsm *.xltx *.xltm)",
+        )
+        if file_path:
+            edit.setText(file_path)
+
     def updated_config(self) -> AppConfig:
         return AppConfig(
             downloads_folder=self.downloads.edit.text(),  # type: ignore[attr-defined]
@@ -259,6 +286,7 @@ class ConfigDialog(QDialog):
             output_folder=self.output.edit.text(),  # type: ignore[attr-defined]
             imported_folder=self.config.imported_folder,
             logs_folder=self.config.logs_folder,
+            work_schedule_lookup=self.work_schedule_lookup.edit.text(),  # type: ignore[attr-defined]
             scan_interval_minutes=self.interval.value(),
             ask_before_delete_original=self.ask_delete.isChecked(),
             selected_printer=self.printer.currentText(),

@@ -17,6 +17,7 @@ class AppConfig:
     output_folder: str
     imported_folder: str
     logs_folder: str
+    work_schedule_lookup: str
     scan_interval_minutes: int = 15
     ask_before_delete_original: bool = True
     selected_printer: str = ""
@@ -32,11 +33,19 @@ class AppConfig:
             output_folder=str(app_root / "output"),
             imported_folder=str(app_root / "imported_files"),
             logs_folder=str(app_root / "logs"),
+            work_schedule_lookup=str(app_root / "politica_horario.xlsx"),
         )
 
     def resolved(self, app_root: Path) -> "AppConfig":
         data = asdict(self)
-        for key in ("downloads_folder", "template_folder", "output_folder", "imported_folder", "logs_folder"):
+        for key in (
+            "downloads_folder",
+            "template_folder",
+            "output_folder",
+            "imported_folder",
+            "logs_folder",
+            "work_schedule_lookup",
+        ):
             value = os.path.expandvars(data[key])
             path = Path(value)
             if not path.is_absolute():
