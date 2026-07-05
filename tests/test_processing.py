@@ -158,6 +158,14 @@ def test_tratamiento_filter_gender_values() -> None:
     assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "Sin definir"}, set()) == ""
 
 
+def test_genero_ending_filters() -> None:
+    assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": "Femenino"}, set()) == "Estimada"
+    assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": "Masculino"}, set()) == "Estimado"
+    assert replace_placeholders("Estimad{{Sexo|genero_plural}}", {"Sexo": "F"}, set()) == "Estimadas"
+    assert replace_placeholders("Estimad{{Sexo|genero_plural}}", {"Sexo": "M"}, set()) == "Estimados"
+    assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": ""}, set()) == "Estimad"
+
+
 def test_docx_template_money_filter(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     Path(config.template_folder).mkdir(parents=True)
