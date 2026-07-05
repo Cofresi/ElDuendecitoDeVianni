@@ -15,10 +15,14 @@ def save_mercury_password(password: str) -> None:
     credential = {
         "Type": win32cred.CRED_TYPE_GENERIC,
         "TargetName": MERCURY_PASSWORD_TARGET,
+        "UserName": "Mercury",
         "CredentialBlob": password,
         "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
     }
     win32cred.CredWrite(credential, 0)
+    saved = load_mercury_password()
+    if saved != password:
+        raise RuntimeError("Windows no confirmo el guardado de la contrasena de Mercury.")
 
 
 def load_mercury_password() -> str:

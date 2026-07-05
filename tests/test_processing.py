@@ -133,6 +133,19 @@ def test_mercury_requires_configured_url(tmp_path: Path) -> None:
         raise AssertionError("Expected MercuryAutomationError")
 
 
+def test_mercury_requires_saved_password(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.mercury_url = "https://example.test"
+    config.mercury_username = "usuario"
+
+    try:
+        run_mercury_login_test(config, "")
+    except MercuryAutomationError as exc:
+        assert "contrasena de Mercury" in str(exc)
+    else:
+        raise AssertionError("Expected MercuryAutomationError")
+
+
 def test_missing_placeholder_is_left_and_reported(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     Path(config.template_folder).mkdir(parents=True)

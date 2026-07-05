@@ -486,10 +486,21 @@ class MainWindow(QMainWindow):
     def open_config(self) -> None:
         dialog = ConfigDialog(self.config, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_mercury_password = dialog.mercury_password.text()
             self.config = dialog.updated_config()
             save_config(self.config, get_app_root())
-            if dialog.mercury_password.text():
-                save_mercury_password(dialog.mercury_password.text())
+            if new_mercury_password:
+                try:
+                    save_mercury_password(new_mercury_password)
+                except Exception as exc:
+                    QMessageBox.warning(
+                        self,
+                        "Contrasena Mercury",
+                        f"No se pudo guardar la contrasena de Mercury.\n\n{exc}",
+                    )
+                    logging.exception("No se pudo guardar la contrasena de Mercury")
+                else:
+                    self.append_log("Contrasena de Mercury guardada en Windows.")
             set_start_with_windows(self.config.start_with_windows)
             ensure_directories(self.config)
             self.processor = DocumentProcessor(self.config)
