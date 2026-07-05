@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from .config import AppConfig, ensure_directories, get_app_root, load_config, save_config
 from .credentials import has_mercury_password, load_mercury_password, save_mercury_password
 from .logging_utils import configure_logging
-from .mercury import MercuryAutomationError, run_mercury_login_test
+from .mercury import MercuryAutomationError, run_mercury_export
 from .office import open_folder, print_file, set_start_with_windows
 from .processor import DocumentProcessor, RunReport
 
@@ -208,6 +208,8 @@ class ConfigDialog(QDialog):
         self.work_schedule_lookup = self._file_row(config.work_schedule_lookup)
         self.mercury_url = QLineEdit(config.mercury_url)
         self.mercury_username = QLineEdit(config.mercury_username)
+        self.mercury_company = QLineEdit(config.mercury_company)
+        self.mercury_report_name = QLineEdit(config.mercury_report_name)
         self.mercury_password = QLineEdit()
         self.mercury_password.setEchoMode(QLineEdit.EchoMode.Password)
         if has_mercury_password():
@@ -234,6 +236,8 @@ class ConfigDialog(QDialog):
         layout.addRow("Tabla de horarios", self.work_schedule_lookup)
         layout.addRow("Mercury URL", self.mercury_url)
         layout.addRow("Usuario Mercury", self.mercury_username)
+        layout.addRow("Compania Mercury", self.mercury_company)
+        layout.addRow("Reporte Mercury", self.mercury_report_name)
         layout.addRow("Contrasena Mercury", self.mercury_password)
         layout.addRow(self.mercury_headless)
         layout.addRow("Intervalo (minutos)", self.interval)
@@ -305,6 +309,8 @@ class ConfigDialog(QDialog):
             work_schedule_lookup=self.work_schedule_lookup.edit.text(),  # type: ignore[attr-defined]
             mercury_url=self.mercury_url.text(),
             mercury_username=self.mercury_username.text(),
+            mercury_company=self.mercury_company.text(),
+            mercury_report_name=self.mercury_report_name.text(),
             mercury_headless=self.mercury_headless.isChecked(),
             scan_interval_minutes=self.interval.value(),
             ask_before_delete_original=self.ask_delete.isChecked(),
@@ -360,7 +366,7 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         for text, callback in (
             ("Procesar ahora", self.scan_now),
-            ("Mercury", self.run_mercury_test),
+            ("Mercury", self.run_mercury),
             ("Plantillas", lambda: open_folder(self.config.template_folder)),
             ("Salida", lambda: open_folder(self.config.output_folder)),
             ("Configuracion", self.open_config),
@@ -382,7 +388,7 @@ class MainWindow(QMainWindow):
         actions = [
             ("Abrir El duendecito de Vianni", self.show_window),
             ("Procesar ahora", self.scan_now),
-            ("Probar Mercury", self.run_mercury_test),
+            ("Mercury", self.run_mercury),
             ("Iniciar monitoreo", self.start_monitoring),
             ("Detener monitoreo", self.stop_monitoring),
             ("Abrir carpeta de salida", lambda: open_folder(self.config.output_folder)),
@@ -512,20 +518,25 @@ class MainWindow(QMainWindow):
         if os.name == "nt":
             os.startfile(self.log_path)  # type: ignore[attr-defined]
 
-    def run_mercury_test(self) -> None:
-        self.append_log("El duendecito esta probando la entrada a Mercury...")
+    def run_mercury(self) -> None:
+        self.append_log("El duendecito esta buscando el reporte en Mercury...")
         try:
-            result = run_mercury_login_test(self.config, load_mercury_password())
+            result = run_mercury_export(self.config, load_mercury_password())
+            self.append_log(result.message)
+            report = self.processor.process_export_file(
+                result.downloaded_file,
+                force=True,
+                delete_original=not self.config.ask_before_delete_original,
+            )
         except MercuryAutomationError as exc:
             QMessageBox.warning(self, "Mercury necesita configuracion", str(exc))
             self.append_log(str(exc))
             return
         except Exception as exc:
-            logging.exception("Error al probar Mercury")
-            QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo probar Mercury.\n\n{exc}")
+            logging.exception("Error al usar Mercury")
+            QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
             return
-        self.append_log(result.message)
-        QMessageBox.information(self, "Mercury", result.message)
+        self.handle_report(report)
 
     def start_monitoring(self) -> None:
         self.monitoring = True

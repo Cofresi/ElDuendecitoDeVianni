@@ -46,6 +46,10 @@ class DocumentProcessor:
         source = find_export(self.config.downloads_folder)
         if not source:
             return RunReport(message="No se encontro un archivo de exportacion en Descargas.")
+        return self.process_export_file(source, force=force, delete_original=delete_original)
+
+    def process_export_file(self, source: str | Path, force: bool = False, delete_original: bool = True) -> RunReport:
+        source = Path(source)
         source_hash = file_sha256(source)
         if self.store.is_processed_hash(source_hash) and not force:
             logging.info("Archivo ya procesado: %s", source)

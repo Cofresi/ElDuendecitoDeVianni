@@ -7,6 +7,8 @@
   "work_schedule_lookup": "politica_horario.xlsx",
   "mercury_url": "",
   "mercury_username": "",
+  "mercury_company": "Supermercado Ines",
+  "mercury_report_name": "EntradasDeHoyTest",
   "mercury_headless": false,
   "scan_interval_minutes": 15,
   "ask_before_delete_original": true,

@@ -20,7 +20,7 @@ from el_duendecito_de_vianni.work_schedule import (
     add_work_schedule_sentence,
     build_work_schedule_sentence,
 )
-from el_duendecito_de_vianni.mercury import MercuryAutomationError, run_mercury_login_test
+from el_duendecito_de_vianni.mercury import MercuryAutomationError, _report_generator_url, run_mercury_login_test
 from el_duendecito_de_vianni.mercury import _find_playwright_chromium
 from el_duendecito_de_vianni.credentials import delete_mercury_password, load_mercury_password, save_mercury_password
 
@@ -35,6 +35,8 @@ def make_config(tmp_path: Path) -> AppConfig:
         work_schedule_lookup=str(tmp_path / "politica_horario.xlsx"),
         mercury_url="",
         mercury_username="",
+        mercury_company="Supermercado Ines",
+        mercury_report_name="EntradasDeHoyTest",
         mercury_headless=False,
     )
 
@@ -156,6 +158,13 @@ def test_find_playwright_chromium_from_local_app_data(tmp_path: Path, monkeypatc
     monkeypatch.delenv("EL_DUENDECITO_CHROMIUM_EXE", raising=False)
 
     assert _find_playwright_chromium() == chrome
+
+
+def test_report_generator_url_uses_mercury_host() -> None:
+    assert (
+        _report_generator_url("http://192.168.1.3/Mercury.Menu/Management.aspx?id=abc")
+        == "http://192.168.1.3/Mercury.RRHH/GeneradorReportes.aspx"
+    )
 
 
 def test_mercury_password_round_trip(tmp_path: Path, monkeypatch) -> None:
