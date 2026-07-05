@@ -92,9 +92,10 @@ Tambien puede aplicar formatos simples agregando `|formato` al marcador:
 {{Salario Base|money}}      -> 18,800.00
 {{Numero|int}}              -> 295
 {{Fecha Ingreso|date}}      -> 04/07/2026
+{{Sexo|tratamiento}}        -> Sra. / Sr.
 ```
 
-Los formatos disponibles son `money`, `int` y `date`. Si no se indica formato, el valor se inserta como texto normal.
+Los formatos disponibles son `money`, `int`, `date` y `tratamiento`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. Si no se indica formato, el valor se inserta como texto normal.
 
 ## Formatos soportados
 

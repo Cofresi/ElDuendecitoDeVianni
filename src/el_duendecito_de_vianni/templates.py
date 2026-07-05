@@ -67,6 +67,15 @@ def _format_date(value: str) -> str:
     return text
 
 
+def _format_treatment(value: str) -> str:
+    text = str(value or "").strip().casefold()
+    if text in {"f", "fem", "femenino", "mujer"}:
+        return "Sra."
+    if text in {"m", "masc", "masculino", "hombre"}:
+        return "Sr."
+    return ""
+
+
 def _format_placeholder_value(value: str, formatter: str) -> str:
     if not formatter:
         return value
@@ -76,6 +85,8 @@ def _format_placeholder_value(value: str, formatter: str) -> str:
         return _format_int(value)
     if formatter == "date":
         return _format_date(value)
+    if formatter == "tratamiento":
+        return _format_treatment(value)
     logging.warning("Formato de marcador desconocido: %s", formatter)
     return value
 

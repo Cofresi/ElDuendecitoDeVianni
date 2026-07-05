@@ -137,16 +137,25 @@ def test_placeholder_format_filters() -> None:
         "Numero": "295.0",
         "Fecha Ingreso": "2026-07-04",
         "Nombre Empleado": "ANA",
+        "Sexo": "Femenino",
     }
 
     rendered = replace_placeholders(
-        "{{Salario Base|money}} {{Numero|int}} {{Fecha Ingreso|date}} {{Nombre Empleado}}",
+        "{{Salario Base|money}} {{Numero|int}} {{Fecha Ingreso|date}} {{Sexo|tratamiento}} {{Nombre Empleado}}",
         values,
         missing,
     )
 
-    assert rendered == "18,800.00 295 04/07/2026 ANA"
+    assert rendered == "18,800.00 295 04/07/2026 Sra. ANA"
     assert not missing
+
+
+def test_tratamiento_filter_gender_values() -> None:
+    assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "F"}, set()) == "Sra."
+    assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "Femenino"}, set()) == "Sra."
+    assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "M"}, set()) == "Sr."
+    assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "Masculino"}, set()) == "Sr."
+    assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "Sin definir"}, set()) == ""
 
 
 def test_docx_template_money_filter(tmp_path: Path) -> None:
@@ -162,6 +171,21 @@ def test_docx_template_money_filter(tmp_path: Path) -> None:
 
     text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
     assert "Salario: 18,800.00" in text
+
+
+def test_docx_template_tratamiento_filter(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    Path(config.template_folder).mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Sexo": "Femenino"}],
+    )
+    make_docx(Path(config.template_folder) / "01_Carta.docx", "{{Sexo|tratamiento}} {{Nombre Empleado}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
+    assert "Sra. ANA" in text
 
 
 def test_xlsx_template_preserves_formula_and_formatting(tmp_path: Path) -> None:
