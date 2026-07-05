@@ -21,6 +21,7 @@ from el_duendecito_de_vianni.work_schedule import (
     build_work_schedule_sentence,
 )
 from el_duendecito_de_vianni.mercury import MercuryAutomationError, run_mercury_login_test
+from el_duendecito_de_vianni.credentials import delete_mercury_password, load_mercury_password, save_mercury_password
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -144,6 +145,16 @@ def test_mercury_requires_saved_password(tmp_path: Path) -> None:
         assert "contrasena de Mercury" in str(exc)
     else:
         raise AssertionError("Expected MercuryAutomationError")
+
+
+def test_mercury_password_round_trip(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("EL_DUENDECITO_CREDENTIAL_DIR", str(tmp_path))
+
+    save_mercury_password("clave-secreta")
+
+    assert load_mercury_password() == "clave-secreta"
+    delete_mercury_password()
+    assert load_mercury_password() == ""
 
 
 def test_missing_placeholder_is_left_and_reported(tmp_path: Path) -> None:
