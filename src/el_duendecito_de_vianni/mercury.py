@@ -98,14 +98,17 @@ def _fill_login_form(page, username: str, password: str) -> None:
     else:
         password_locator.press("Enter")
     page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    _wait_for_post_login_page(page)
 
 
 def _download_existing_report(page, config: AppConfig) -> Path:
     _select_company(page, config.mercury_company)
+    _open_human_resources(page)
     page.goto(_report_generator_url(config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
+    _raise_if_not_authenticated(page)
     _click_text(page, "Abrir reporte existente")
     _click_text(page, config.mercury_report_name)
-    _click_text(page, "Aceptar")
+    _click_selector_or_text(page, "#ctl00_MainContent_cmdAceptarReporte", "Aceptar")
     page.wait_for_load_state("domcontentloaded", timeout=15_000)
     _click_text(page, "Ver reporte")
 
@@ -125,13 +128,53 @@ def _download_existing_report(page, config: AppConfig) -> Path:
 def _select_company(page, company_name: str) -> None:
     if not company_name:
         return
+    _wait_for_post_login_page(page)
     select = page.locator("select").first
     try:
         if select.count() and select.is_visible(timeout=5_000):
             select.select_option(label=company_name)
+            page.wait_for_timeout(1_000)
             page.wait_for_load_state("domcontentloaded", timeout=10_000)
     except Exception:
         logging.info("No se selecciono compania en pantalla inicial; se continua con la sesion actual.")
+
+
+def _wait_for_post_login_page(page) -> None:
+    try:
+        page.get_by_text("Company", exact=True).wait_for(timeout=20_000)
+        return
+    except Exception:
+        pass
+    try:
+        page.get_by_text("Human Resources Management", exact=True).wait_for(timeout=10_000)
+        return
+    except Exception as exc:
+        raise MercuryAutomationError("Mercury no mostro la pagina inicial despues de iniciar sesion.") from exc
+
+
+def _open_human_resources(page) -> None:
+    _click_tile_by_text(page, "Human Resources Management")
+    try:
+        page.wait_for_function(
+            "() => location.href.includes('Mercury.RRHH') || document.body.innerText.includes('Principal')",
+            timeout=20_000,
+        )
+    except Exception as exc:
+        raise MercuryAutomationError("Mercury no abrio el modulo de Recursos Humanos.") from exc
+    _raise_if_not_authenticated(page)
+
+
+def _raise_if_not_authenticated(page) -> None:
+    try:
+        if page.get_by_text("User is not authenticated", exact=False).is_visible(timeout=2_000):
+            raise MercuryAutomationError(
+                "Mercury no acepto la sesion para Recursos Humanos. "
+                "Revise que la compania este seleccionada antes de abrir reportes."
+            )
+    except MercuryAutomationError:
+        raise
+    except Exception:
+        return
 
 
 def _report_generator_url(login_url: str) -> str:
@@ -143,6 +186,98 @@ def _report_generator_url(login_url: str) -> str:
 
 def _click_text(page, text: str) -> None:
     page.get_by_text(text, exact=True).click(timeout=20_000)
+
+
+def _click_selector_or_text(page, selector: str, text: str) -> None:
+    locator = page.locator(selector).first
+    try:
+        if locator.count():
+            locator.click(timeout=20_000)
+            return
+    except Exception:
+        logging.info("No se pudo usar selector Mercury %s; se intenta por texto.", selector)
+    page.get_by_role("button", name=text).click(timeout=20_000)
+
+
+def _click_clickable_parent(page, text: str) -> None:
+    locator = page.get_by_text(text, exact=True).first
+    locator.wait_for(timeout=20_000)
+    handle = locator.element_handle()
+    if not handle:
+        raise MercuryAutomationError(f"No se encontro la opcion {text}.")
+    clicked = handle.evaluate(
+        """
+        (node) => {
+            let element = node;
+            for (let i = 0; i < 10 && element; i += 1) {
+                const style = window.getComputedStyle(element);
+                const tag = element.tagName.toLowerCase();
+                if (
+                    tag === "a" ||
+                    tag === "button" ||
+                    element.onclick ||
+                    element.getAttribute("role") === "button" ||
+                    style.cursor === "pointer"
+                ) {
+                    element.click();
+                    return true;
+                }
+                element = element.parentElement;
+            }
+            node.click();
+            return false;
+        }
+        """
+    )
+    if not clicked:
+        logging.info("Se hizo click directamente sobre el texto %s.", text)
+
+
+def _click_tile_by_text(page, text: str) -> None:
+    locator = page.get_by_text(text, exact=True).first
+    locator.wait_for(timeout=20_000)
+
+    click_points = locator.evaluate(
+        """
+        (node) => {
+            const points = [];
+            let element = node;
+            for (let i = 0; i < 12 && element; i += 1) {
+                const rect = element.getBoundingClientRect();
+                if (rect.width >= 180 && rect.height >= 120) {
+                    points.push({
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+                    });
+                }
+                element = element.parentElement;
+            }
+            const label = node.getBoundingClientRect();
+            points.push({
+                x: label.left + label.width / 2,
+                y: Math.max(10, label.top - 120),
+            });
+            points.push({
+                x: label.left + label.width / 2,
+                y: label.top + label.height / 2,
+            });
+            return points;
+        }
+        """
+    )
+
+    for point in click_points:
+        page.mouse.click(point["x"], point["y"])
+        try:
+            page.wait_for_function(
+                "() => location.href.includes('Mercury.RRHH') || document.body.innerText.includes('Principal')",
+                timeout=4_000,
+            )
+            return
+        except Exception:
+            continue
+
+    raise MercuryAutomationError(f"Mercury no abrio la opcion {text}.")
 
 
 def _first_visible(page, selectors: list[str], required: bool = True):
