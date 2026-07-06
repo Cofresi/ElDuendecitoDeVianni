@@ -295,10 +295,14 @@ def _first_visible(page, selectors: list[str], required: bool = True):
 
 
 def _browser_launch_options() -> dict[str, str]:
-    executable_path = _find_playwright_chromium()
+    executable_path = _find_browser_executable()
     if executable_path:
         return {"executable_path": str(executable_path)}
     return {}
+
+
+def _find_browser_executable() -> Path | None:
+    return _find_playwright_chromium() or _find_installed_browser()
 
 
 def _find_playwright_chromium() -> Path | None:
@@ -316,3 +320,22 @@ def _find_playwright_chromium() -> Path | None:
 
     matches = sorted(browser_root.glob("chromium-*/chrome-win64/chrome.exe"), reverse=True)
     return matches[0] if matches else None
+
+
+def _find_installed_browser() -> Path | None:
+    env_candidates = [
+        ("PROGRAMFILES", "Microsoft/Edge/Application/msedge.exe"),
+        ("PROGRAMFILES(X86)", "Microsoft/Edge/Application/msedge.exe"),
+        ("LOCALAPPDATA", "Microsoft/Edge/Application/msedge.exe"),
+        ("PROGRAMFILES", "Google/Chrome/Application/chrome.exe"),
+        ("PROGRAMFILES(X86)", "Google/Chrome/Application/chrome.exe"),
+        ("LOCALAPPDATA", "Google/Chrome/Application/chrome.exe"),
+    ]
+    for env_name, relative_path in env_candidates:
+        base = os.getenv(env_name)
+        if not base:
+            continue
+        candidate = Path(base) / Path(relative_path)
+        if candidate.exists():
+            return candidate
+    return None

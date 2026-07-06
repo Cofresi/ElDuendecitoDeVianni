@@ -20,7 +20,13 @@ from el_duendecito_de_vianni.work_schedule import (
     add_work_schedule_sentence,
     build_work_schedule_sentence,
 )
-from el_duendecito_de_vianni.mercury import MercuryAutomationError, _report_generator_url, run_mercury_login_test
+from el_duendecito_de_vianni.mercury import (
+    MercuryAutomationError,
+    _find_installed_browser,
+    _find_playwright_chromium,
+    _report_generator_url,
+    run_mercury_login_test,
+)
 from el_duendecito_de_vianni.mercury import _find_playwright_chromium
 from el_duendecito_de_vianni.credentials import delete_mercury_password, load_mercury_password, save_mercury_password
 
@@ -158,6 +164,17 @@ def test_find_playwright_chromium_from_local_app_data(tmp_path: Path, monkeypatc
     monkeypatch.delenv("EL_DUENDECITO_CHROMIUM_EXE", raising=False)
 
     assert _find_playwright_chromium() == chrome
+
+
+def test_find_installed_edge_when_playwright_browser_is_missing(tmp_path: Path, monkeypatch) -> None:
+    edge = tmp_path / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+    edge.parent.mkdir(parents=True)
+    edge.write_text("fake edge", encoding="utf-8")
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path))
+    monkeypatch.delenv("PROGRAMFILES(X86)", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    assert _find_installed_browser() == edge
 
 
 def test_report_generator_url_uses_mercury_host() -> None:
