@@ -311,20 +311,9 @@ def _raise_if_not_authenticated(page) -> None:
 def _open_report_generator(page, config: AppConfig) -> None:
     if _is_report_generator_page(page):
         return
-    dashboard_url = page.url
     if _try_open_report_generator_from_menu(page):
         return
-
-    page.goto(_report_generator_url(config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
-    try:
-        _raise_if_not_authenticated(page)
-    except MercuryAutomationError:
-        page.goto(dashboard_url, wait_until="domcontentloaded", timeout=60_000)
-        if _try_open_report_generator_from_menu(page):
-            return
-        raise
-    if not _is_report_generator_page(page):
-        raise MercuryAutomationError("Mercury no abrio el generador de reportes.")
+    raise MercuryAutomationError("Mercury no abrio el generador de reportes desde el menu.")
 
 
 def _is_report_generator_page(page) -> bool:
@@ -344,6 +333,8 @@ def _try_open_report_generator_from_menu(page) -> bool:
     if _click_likely_reports_menu(page):
         if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=5_000):
             return _wait_for_report_generator_page(page, timeout=10_000)
+    if _click_sidebar_until_report_generator(page):
+        return True
     return False
 
 
@@ -415,6 +406,55 @@ def _click_likely_reports_menu(page) -> bool:
     if clicked:
         page.wait_for_timeout(1_000)
     return bool(clicked)
+
+
+def _click_sidebar_until_report_generator(page) -> bool:
+    points = page.evaluate(
+        """
+        () => {
+            const candidates = Array.from(document.querySelectorAll("a, button, li, div, span, i"));
+            const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            };
+            const seen = new Set();
+            return candidates
+                .filter((element) => visible(element))
+                .map((element) => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                        x: Math.round(rect.left + rect.width / 2),
+                        y: Math.round(rect.top + rect.height / 2),
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                    };
+                })
+                .filter((point) => point.left >= 0 && point.left < 110 && point.top > 120 && point.top < 650)
+                .filter((point) => point.width <= 110 && point.height <= 110)
+                .filter((point) => {
+                    const key = `${point.x}:${point.y}`;
+                    if (seen.has(key)) {
+                        return false;
+                    }
+                    seen.add(key);
+                    return true;
+                })
+                .sort((a, b) => b.y - a.y);
+        }
+        """
+    )
+
+    for point in points:
+        page.mouse.click(point["x"], point["y"])
+        page.wait_for_timeout(800)
+        if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=1_500):
+            return _wait_for_report_generator_page(page, timeout=10_000)
+        if _is_report_generator_page(page):
+            return True
+    return False
 
 
 def _report_generator_url(login_url: str) -> str:
