@@ -318,6 +318,11 @@ def _open_report_generator(page, config: AppConfig) -> None:
         return
     if _try_open_report_generator_from_menu(page):
         return
+    if _is_human_resources_page(page):
+        page.goto(_report_generator_url(page.url or config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
+        _raise_if_not_authenticated(page)
+        if _is_report_generator_page(page):
+            return
     raise MercuryAutomationError("Mercury no abrio el generador de reportes desde el menu.")
 
 
