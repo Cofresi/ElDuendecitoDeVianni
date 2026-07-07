@@ -23,6 +23,7 @@ from el_duendecito_de_vianni.work_schedule import (
 )
 from el_duendecito_de_vianni.mercury import (
     MercuryAutomationError,
+    _POST_HR_MARKERS,
     _company_file_label,
     _find_installed_browser,
     _find_playwright_chromium,
@@ -143,6 +144,10 @@ def test_empty_employee_sheet_has_no_employee_rows(tmp_path: Path) -> None:
     workbook.save(path)
 
     assert not has_employee_rows(path)
+
+
+def test_management_tile_label_is_not_hr_page_marker() -> None:
+    assert "Recursos Humanos" not in _POST_HR_MARKERS
 
 
 def test_mercury_requires_configured_url(tmp_path: Path) -> None:

@@ -209,7 +209,12 @@ _HUMAN_RESOURCES_LABELS = (
     "Human Resources",
     "Human Resources Management",
 )
-_POST_HR_MARKERS = ("Principal", "Generador de Reportes", "Recursos Humanos")
+_POST_HR_MARKERS = (
+    "Principal",
+    "Generador de Reportes",
+    "Cantidad de empleados activos",
+    "Presupuestos pendientes",
+)
 _REPORT_GENERATOR_LABELS = ("Generador de reportes", "Generador de Reportes", "Report Generator")
 
 
