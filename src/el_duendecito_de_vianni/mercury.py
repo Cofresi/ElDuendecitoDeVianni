@@ -386,14 +386,55 @@ def _wait_for_report_generator_page(page, timeout: int = 10_000) -> bool:
 
 
 def _click_any_visible_text(page, texts: tuple[str, ...], timeout: int = 5_000) -> bool:
-    for text in texts:
-        try:
-            locator = page.get_by_text(text, exact=False).first
-            if locator.is_visible(timeout=timeout):
-                locator.click(timeout=timeout)
-                return True
-        except Exception:
-            continue
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        clicked = page.evaluate(
+            """
+            (texts) => {
+                const normalize = (value) => (value || "")
+                    .normalize("NFD")
+                    .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/\\s+/g, " ")
+                    .trim()
+                    .toLocaleLowerCase();
+                const wanted = texts.map((text) => normalize(text));
+                const visible = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+                };
+                const candidates = Array.from(document.querySelectorAll("*"))
+                    .filter((element) => visible(element))
+                    .map((element) => {
+                        const rect = element.getBoundingClientRect();
+                        const text = normalize([
+                            element.innerText,
+                            element.textContent,
+                            element.getAttribute("title"),
+                            element.getAttribute("aria-label"),
+                            element.getAttribute("href"),
+                        ].join(" "));
+                        return { element, rect, text };
+                    })
+                    .filter((item) => wanted.some((text) => item.text.includes(text)))
+                    .filter((item) => item.rect.width < 800 && item.rect.height < 500)
+                    .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+                if (!candidates.length) {
+                    return false;
+                }
+                const element = candidates[0].element;
+                const target = element.closest("a, button, li, [onclick], [role='button']") || element;
+                target.click();
+                return true;
+            }
+            """,
+            list(texts),
+        )
+        if clicked:
+            return True
+        page.wait_for_timeout(step)
+        elapsed += step
     return False
 
 
@@ -408,24 +449,28 @@ def _click_likely_reports_menu(page) -> bool:
                 const style = window.getComputedStyle(element);
                 return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
             };
-            for (const element of candidates) {
-                if (!visible(element)) {
-                    continue;
-                }
-                const text = [
-                    element.innerText,
-                    element.textContent,
-                    element.getAttribute("title"),
-                    element.getAttribute("aria-label"),
-                    element.getAttribute("href"),
-                    element.className,
-                    element.id,
-                ].join(" ").toLocaleLowerCase();
-                if (keywords.some((keyword) => text.includes(keyword))) {
-                    const target = element.closest("a, button, li, [onclick], [role='button']") || element;
-                    target.click();
-                    return true;
-                }
+            const matches = candidates
+                .filter((element) => visible(element))
+                .map((element) => {
+                    const rect = element.getBoundingClientRect();
+                    const text = [
+                        element.innerText,
+                        element.textContent,
+                        element.getAttribute("title"),
+                        element.getAttribute("aria-label"),
+                        element.getAttribute("href"),
+                        element.className,
+                        element.id,
+                    ].join(" ").toLocaleLowerCase();
+                    return { element, rect, text };
+                })
+                .filter((item) => keywords.some((keyword) => item.text.includes(keyword)))
+                .filter((item) => item.rect.width < 800 && item.rect.height < 500)
+                .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+            if (matches.length) {
+                const target = matches[0].element.closest("a, button, li, [onclick], [role='button']") || matches[0].element;
+                target.click();
+                return true;
             }
             const icons = candidates
                 .filter((element) => visible(element))
