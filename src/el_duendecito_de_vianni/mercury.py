@@ -203,7 +203,13 @@ _NO_RECORDS_MESSAGES = (
 )
 
 _COMPANY_LABELS = ("Compañía", "Compania", "Company")
-_HUMAN_RESOURCES_LABELS = ("Administración Recursos Humanos", "Administracion Recursos Humanos", "Human Resources Management")
+_HUMAN_RESOURCES_LABELS = (
+    "Recursos Humanos",
+    "Administración Recursos Humanos",
+    "Administracion Recursos Humanos",
+    "Human Resources",
+    "Human Resources Management",
+)
 _POST_HR_MARKERS = ("Principal", "Generador de Reportes", "Recursos Humanos")
 
 
@@ -328,7 +334,7 @@ def _wait_for_any_text(page, texts: tuple[str, ...], timeout: int) -> bool:
     while elapsed <= timeout:
         for text in texts:
             try:
-                if page.get_by_text(text, exact=True).first.is_visible(timeout=500):
+                if page.get_by_text(text, exact=False).first.is_visible(timeout=500):
                     return True
             except Exception:
                 continue
@@ -343,6 +349,8 @@ def _click_tile_by_any_text(page, texts: tuple[str, ...]) -> None:
             _click_tile_by_text(page, text)
             return
         except Exception as exc:
+            if "Mercury.RRHH" in page.url:
+                return
             last_error = exc
     options = ", ".join(texts)
     raise MercuryAutomationError(f"Mercury no abrio ninguna de estas opciones: {options}") from last_error
@@ -394,7 +402,7 @@ def _click_clickable_parent(page, text: str) -> None:
 
 
 def _click_tile_by_text(page, text: str) -> None:
-    locator = page.get_by_text(text, exact=True).first
+    locator = page.get_by_text(text, exact=False).first
     locator.wait_for(timeout=20_000)
 
     click_points = locator.evaluate(
