@@ -106,9 +106,11 @@ Tambien puede aplicar formatos simples agregando `|formato` al marcador:
 {{Sexo|tratamiento}}        -> Sra. / Sr.
 Estimad{{Sexo|genero}}      -> Estimada / Estimado
 Estimad{{Sexo|genero_plural}} -> Estimadas / Estimados
+colaborador{{Sexo|genero_sustantivo}} -> colaboradora / colaborador
+colaborador{{Sexo|genero_sustantivo_plural}} -> colaboradoras / colaboradores
 ```
 
-Los formatos disponibles son `money`, `int`, `date`, `tratamiento`, `genero` y `genero_plural`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. `genero` genera `a` u `o`, y `genero_plural` genera `as` u `os`. Si no se indica formato, el valor se inserta como texto normal.
+Los formatos disponibles son `money`, `int`, `date`, `tratamiento`, `genero`, `genero_plural`, `genero_sustantivo` y `genero_sustantivo_plural`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. `genero` genera `a` u `o`, y `genero_plural` genera `as` u `os`. `genero_sustantivo` genera `a` o vacio, y `genero_sustantivo_plural` genera `as` o `es`. Si no se indica formato, el valor se inserta como texto normal.
 
 ### Horario laboral
 

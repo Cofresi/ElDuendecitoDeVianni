@@ -94,6 +94,15 @@ def _format_gender_ending(value: str, plural: bool = False) -> str:
     return ""
 
 
+def _format_gender_noun_ending(value: str, plural: bool = False) -> str:
+    gender = _gender_code(value)
+    if gender == "f":
+        return "as" if plural else "a"
+    if gender == "m":
+        return "es" if plural else ""
+    return ""
+
+
 def _format_placeholder_value(value: str, formatter: str) -> str:
     if not formatter:
         return value
@@ -109,6 +118,10 @@ def _format_placeholder_value(value: str, formatter: str) -> str:
         return _format_gender_ending(value)
     if formatter == "genero_plural":
         return _format_gender_ending(value, plural=True)
+    if formatter == "genero_sustantivo":
+        return _format_gender_noun_ending(value)
+    if formatter == "genero_sustantivo_plural":
+        return _format_gender_noun_ending(value, plural=True)
     logging.warning("Formato de marcador desconocido: %s", formatter)
     return value
 

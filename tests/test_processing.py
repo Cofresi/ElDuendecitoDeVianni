@@ -285,6 +285,14 @@ def test_genero_ending_filters() -> None:
     assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": ""}, set()) == "Estimad"
 
 
+def test_genero_sustantivo_ending_filters() -> None:
+    assert replace_placeholders("colaborador{{Sexo|genero_sustantivo}}", {"Sexo": "F"}, set()) == "colaboradora"
+    assert replace_placeholders("colaborador{{Sexo|genero_sustantivo}}", {"Sexo": "M"}, set()) == "colaborador"
+    assert replace_placeholders("colaborador{{Sexo|genero_sustantivo_plural}}", {"Sexo": "Femenino"}, set()) == "colaboradoras"
+    assert replace_placeholders("colaborador{{Sexo|genero_sustantivo_plural}}", {"Sexo": "Masculino"}, set()) == "colaboradores"
+    assert replace_placeholders("colaborador{{Sexo|genero_sustantivo}}", {"Sexo": ""}, set()) == "colaborador"
+
+
 def test_work_schedule_sentence_for_six_day_policy() -> None:
     sentence = build_work_schedule_sentence(
         SchedulePolicy(
