@@ -330,12 +330,43 @@ def _try_open_report_generator_from_menu(page) -> bool:
     if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=2_000):
         return _wait_for_report_generator_page(page, timeout=10_000)
 
+    _open_left_navigation(page)
+    if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=2_000):
+        return _wait_for_report_generator_page(page, timeout=10_000)
+
     if _click_likely_reports_menu(page):
         if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=5_000):
             return _wait_for_report_generator_page(page, timeout=10_000)
     if _click_sidebar_until_report_generator(page):
         return True
     return False
+
+
+def _open_left_navigation(page) -> None:
+    clicked = page.evaluate(
+        """
+        () => {
+            const candidates = Array.from(document.querySelectorAll("*"));
+            const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            };
+            const menu = candidates
+                .filter((element) => visible(element))
+                .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+                .find((item) => item.rect.left >= 0 && item.rect.left < 100 && item.rect.top >= 40 && item.rect.top < 140);
+            if (!menu) {
+                return false;
+            }
+            const target = menu.element.closest("a, button, li, [onclick], [role='button']") || menu.element;
+            target.click();
+            return true;
+        }
+        """
+    )
+    if clicked:
+        page.wait_for_timeout(1_000)
 
 
 def _wait_for_report_generator_page(page, timeout: int = 10_000) -> bool:
@@ -366,7 +397,7 @@ def _click_likely_reports_menu(page) -> bool:
         """
         () => {
             const keywords = ["reporte", "report", "listado", "consulta"];
-            const candidates = Array.from(document.querySelectorAll("a, button, li, div, span"));
+            const candidates = Array.from(document.querySelectorAll("*"));
             const visible = (element) => {
                 const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
@@ -386,17 +417,20 @@ def _click_likely_reports_menu(page) -> bool:
                     element.id,
                 ].join(" ").toLocaleLowerCase();
                 if (keywords.some((keyword) => text.includes(keyword))) {
-                    element.click();
+                    const target = element.closest("a, button, li, [onclick], [role='button']") || element;
+                    target.click();
                     return true;
                 }
             }
             const icons = candidates
                 .filter((element) => visible(element))
                 .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-                .filter((item) => item.rect.left < 90 && item.rect.top > 120 && item.rect.width <= 90 && item.rect.height <= 90)
+                .filter((item) => item.rect.left >= 0 && item.rect.left < 110 && item.rect.top > 120 && item.rect.top < 650)
+                .filter((item) => item.rect.width <= 110 && item.rect.height <= 110)
                 .sort((a, b) => b.rect.top - a.rect.top);
             if (icons.length) {
-                icons[0].element.click();
+                const target = icons[0].element.closest("a, button, li, [onclick], [role='button']") || icons[0].element;
+                target.click();
                 return true;
             }
             return false;
@@ -412,7 +446,7 @@ def _click_sidebar_until_report_generator(page) -> bool:
     points = page.evaluate(
         """
         () => {
-            const candidates = Array.from(document.querySelectorAll("a, button, li, div, span, i"));
+            const candidates = Array.from(document.querySelectorAll("*"));
             const visible = (element) => {
                 const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
@@ -423,13 +457,15 @@ def _click_sidebar_until_report_generator(page) -> bool:
                 .filter((element) => visible(element))
                 .map((element) => {
                     const rect = element.getBoundingClientRect();
+                    const clickable = element.closest("a, button, li, [onclick], [role='button']") || element;
+                    const clickableRect = clickable.getBoundingClientRect();
                     return {
-                        x: Math.round(rect.left + rect.width / 2),
-                        y: Math.round(rect.top + rect.height / 2),
-                        left: rect.left,
-                        top: rect.top,
-                        width: rect.width,
-                        height: rect.height,
+                        x: Math.round(clickableRect.left + clickableRect.width / 2),
+                        y: Math.round(clickableRect.top + clickableRect.height / 2),
+                        left: clickableRect.left,
+                        top: clickableRect.top,
+                        width: clickableRect.width,
+                        height: clickableRect.height,
                     };
                 })
                 .filter((point) => point.left >= 0 && point.left < 110 && point.top > 120 && point.top < 650)
@@ -449,7 +485,7 @@ def _click_sidebar_until_report_generator(page) -> bool:
 
     for point in points:
         page.mouse.click(point["x"], point["y"])
-        page.wait_for_timeout(800)
+        page.wait_for_timeout(1_500)
         if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=1_500):
             return _wait_for_report_generator_page(page, timeout=10_000)
         if _is_report_generator_page(page):
@@ -565,12 +601,31 @@ def _click_clickable_parent(page, text: str) -> None:
 
 
 def _click_tile_by_text(page, text: str) -> None:
-    locator = page.get_by_text(text, exact=False).first
-    locator.wait_for(timeout=20_000)
-
-    click_points = locator.evaluate(
+    click_points = page.evaluate(
         """
-        (node) => {
+        (wantedText) => {
+            const normalize = (value) => (value || "")
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/\\s+/g, " ")
+                .trim()
+                .toLocaleLowerCase();
+            const wanted = normalize(wantedText);
+            const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            };
+            const matches = Array.from(document.querySelectorAll("*"))
+                .filter((element) => visible(element))
+                .map((element) => ({ element, rect: element.getBoundingClientRect(), text: normalize(element.innerText || element.textContent) }))
+                .filter((item) => item.text.includes(wanted))
+                .filter((item) => item.rect.width < 700 && item.rect.height < 400)
+                .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+            if (!matches.length) {
+                return [];
+            }
+            let node = matches[0].element;
             const points = [];
             let element = node;
             for (let i = 0; i < 12 && element; i += 1) {
@@ -594,8 +649,11 @@ def _click_tile_by_text(page, text: str) -> None:
             });
             return points;
         }
-        """
+        """,
+        text,
     )
+    if not click_points:
+        raise MercuryAutomationError(f"No se encontro la opcion {text}.")
 
     for point in click_points:
         page.mouse.click(point["x"], point["y"])
