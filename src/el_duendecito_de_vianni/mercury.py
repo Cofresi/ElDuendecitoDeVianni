@@ -136,8 +136,7 @@ def _fill_login_form(page, username: str, password: str) -> None:
 def _download_existing_report(page, config: AppConfig, company_name: str) -> Path | None:
     _select_company(page, company_name)
     _open_human_resources(page)
-    page.goto(_report_generator_url(config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
-    _raise_if_not_authenticated(page)
+    _open_report_generator(page, config)
     _click_text(page, "Abrir reporte existente")
     _click_text(page, config.mercury_report_name)
     _click_selector_or_text(page, "#ctl00_MainContent_cmdAceptarReporte", "Aceptar")
@@ -211,6 +210,7 @@ _HUMAN_RESOURCES_LABELS = (
     "Human Resources Management",
 )
 _POST_HR_MARKERS = ("Principal", "Generador de Reportes", "Recursos Humanos")
+_REPORT_GENERATOR_LABELS = ("Generador de reportes", "Generador de Reportes", "Report Generator")
 
 
 def _wait_for_no_records(page, timeout: int = 5_000) -> bool:
@@ -306,6 +306,115 @@ def _raise_if_not_authenticated(page) -> None:
         raise
     except Exception:
         return
+
+
+def _open_report_generator(page, config: AppConfig) -> None:
+    if _is_report_generator_page(page):
+        return
+    dashboard_url = page.url
+    if _try_open_report_generator_from_menu(page):
+        return
+
+    page.goto(_report_generator_url(config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
+    try:
+        _raise_if_not_authenticated(page)
+    except MercuryAutomationError:
+        page.goto(dashboard_url, wait_until="domcontentloaded", timeout=60_000)
+        if _try_open_report_generator_from_menu(page):
+            return
+        raise
+    if not _is_report_generator_page(page):
+        raise MercuryAutomationError("Mercury no abrio el generador de reportes.")
+
+
+def _is_report_generator_page(page) -> bool:
+    if "generadorreportes" in page.url.casefold():
+        return True
+    try:
+        body = page.locator("body").inner_text(timeout=1_000).casefold()
+    except Exception:
+        return False
+    return "generador de reportes" in body
+
+
+def _try_open_report_generator_from_menu(page) -> bool:
+    if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=2_000):
+        return _wait_for_report_generator_page(page, timeout=10_000)
+
+    if _click_likely_reports_menu(page):
+        if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=5_000):
+            return _wait_for_report_generator_page(page, timeout=10_000)
+    return False
+
+
+def _wait_for_report_generator_page(page, timeout: int = 10_000) -> bool:
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        if _is_report_generator_page(page):
+            return True
+        page.wait_for_timeout(step)
+        elapsed += step
+    return False
+
+
+def _click_any_visible_text(page, texts: tuple[str, ...], timeout: int = 5_000) -> bool:
+    for text in texts:
+        try:
+            locator = page.get_by_text(text, exact=False).first
+            if locator.is_visible(timeout=timeout):
+                locator.click(timeout=timeout)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _click_likely_reports_menu(page) -> bool:
+    clicked = page.evaluate(
+        """
+        () => {
+            const keywords = ["reporte", "report", "listado", "consulta"];
+            const candidates = Array.from(document.querySelectorAll("a, button, li, div, span"));
+            const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            };
+            for (const element of candidates) {
+                if (!visible(element)) {
+                    continue;
+                }
+                const text = [
+                    element.innerText,
+                    element.textContent,
+                    element.getAttribute("title"),
+                    element.getAttribute("aria-label"),
+                    element.getAttribute("href"),
+                    element.className,
+                    element.id,
+                ].join(" ").toLocaleLowerCase();
+                if (keywords.some((keyword) => text.includes(keyword))) {
+                    element.click();
+                    return true;
+                }
+            }
+            const icons = candidates
+                .filter((element) => visible(element))
+                .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+                .filter((item) => item.rect.left < 90 && item.rect.top > 120 && item.rect.width <= 90 && item.rect.height <= 90)
+                .sort((a, b) => b.rect.top - a.rect.top);
+            if (icons.length) {
+                icons[0].element.click();
+                return true;
+            }
+            return false;
+        }
+        """
+    )
+    if clicked:
+        page.wait_for_timeout(1_000)
+    return bool(clicked)
 
 
 def _report_generator_url(login_url: str) -> str:
