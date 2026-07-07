@@ -32,3 +32,7 @@ def read_employees(path: str | Path) -> list[dict[str, str]]:
     for _, row in frame.iterrows():
         employees.append({str(column): _format_value(row[column]) for column in frame.columns})
     return employees
+
+
+def has_employee_rows(path: str | Path) -> bool:
+    return bool(read_employees(path))

@@ -11,6 +11,7 @@ from el_duendecito_de_vianni.importer import import_export
 from el_duendecito_de_vianni.processed_store import ProcessedStore, file_sha256
 from el_duendecito_de_vianni.processor import DocumentProcessor
 from el_duendecito_de_vianni.spreadsheet import read_employees
+from el_duendecito_de_vianni.spreadsheet import has_employee_rows
 from el_duendecito_de_vianni.templates import process_docx, replace_placeholders
 from el_duendecito_de_vianni.utils import company_template_subfolder, employee_folder_name, sorted_templates
 from el_duendecito_de_vianni.work_schedule import (
@@ -22,12 +23,13 @@ from el_duendecito_de_vianni.work_schedule import (
 )
 from el_duendecito_de_vianni.mercury import (
     MercuryAutomationError,
+    _company_file_label,
     _find_installed_browser,
     _find_playwright_chromium,
+    _configured_companies,
     _report_generator_url,
     run_mercury_login_test,
 )
-from el_duendecito_de_vianni.mercury import _find_playwright_chromium
 from el_duendecito_de_vianni.credentials import delete_mercury_password, load_mercury_password, save_mercury_password
 
 
@@ -42,7 +44,8 @@ def make_config(tmp_path: Path) -> AppConfig:
         mercury_url="",
         mercury_username="",
         mercury_company="Supermercado Ines",
-        mercury_report_name="EntradasDeHoyTest",
+        mercury_companies="Supermercado Ines;Brothers",
+        mercury_report_name="EntradasDeHoy",
         mercury_headless=False,
     )
 
@@ -132,6 +135,16 @@ def test_blank_excel_cells_become_blank_text(tmp_path: Path) -> None:
     assert rows[0]["Telefono1"] == ""
 
 
+def test_empty_employee_sheet_has_no_employee_rows(tmp_path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Numero", "Nombre Empleado"])
+    path = tmp_path / "empty.xlsx"
+    workbook.save(path)
+
+    assert not has_employee_rows(path)
+
+
 def test_mercury_requires_configured_url(tmp_path: Path) -> None:
     config = make_config(tmp_path)
 
@@ -182,6 +195,14 @@ def test_report_generator_url_uses_mercury_host() -> None:
         _report_generator_url("http://192.168.1.3/Mercury.Menu/Management.aspx?id=abc")
         == "http://192.168.1.3/Mercury.RRHH/GeneradorReportes.aspx"
     )
+
+
+def test_mercury_company_list_and_file_labels(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+
+    assert _configured_companies(config) == ["Supermercado Ines", "Brothers"]
+    assert _company_file_label("Supermercado Ines") == "Ines"
+    assert _company_file_label("Brothers") == "Brothers"
 
 
 def test_mercury_password_round_trip(tmp_path: Path, monkeypatch) -> None:
@@ -453,6 +474,8 @@ def test_company_template_routing_uses_ines_folder(tmp_path: Path) -> None:
     generated = Path(report.generated_documents[0])
     assert generated.name == "01_Ines.docx"
     assert "Ines ANA" in "\n".join(p.text for p in Document(generated).paragraphs)
+    assert Path(report.output_folder).parent.name.startswith("nuevasEntradas_")
+    assert Path(report.output_folder).name == "Ines"
 
 
 def test_company_template_routing_uses_brothers_for_other_companies(tmp_path: Path) -> None:
@@ -474,6 +497,8 @@ def test_company_template_routing_uses_brothers_for_other_companies(tmp_path: Pa
     generated = Path(report.generated_documents[0])
     assert generated.name == "01_Brothers.docx"
     assert "Brothers LUIS" in "\n".join(p.text for p in Document(generated).paragraphs)
+    assert Path(report.output_folder).parent.name.startswith("nuevasEntradas_")
+    assert Path(report.output_folder).name == "Brothers"
 
 
 def test_company_template_subfolder_mapping() -> None:

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from urllib.parse import urlparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import AppConfig
@@ -15,6 +16,8 @@ class MercuryRunResult:
     success: bool
     message: str
     downloaded_file: str = ""
+    downloaded_files: list[str] = field(default_factory=list)
+    companies_without_download: list[str] = field(default_factory=list)
 
 
 class MercuryAutomationError(RuntimeError):
@@ -46,26 +49,55 @@ def run_mercury_export(config: AppConfig, password: str, download_report: bool =
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=config.mercury_headless, **_browser_launch_options())
-        context = browser.new_context(accept_downloads=True)
-        page = context.new_page()
         try:
-            page.goto(config.mercury_url, wait_until="domcontentloaded", timeout=60_000)
-            _fill_login_form(page, config.mercury_username, password)
             if not download_report:
-                logging.info("Prueba de Mercury completada en %s", config.mercury_url)
-                return MercuryRunResult(True, "Mercury abrio correctamente y se intento iniciar sesion.")
-            downloaded = _download_existing_report(page, config)
-            logging.info("Reporte de Mercury descargado: %s", downloaded)
+                context = browser.new_context(accept_downloads=True)
+                page = context.new_page()
+                try:
+                    _open_authenticated_session(page, config, password)
+                    logging.info("Prueba de Mercury completada en %s", config.mercury_url)
+                    return MercuryRunResult(True, "Mercury abrio correctamente y se intento iniciar sesion.")
+                finally:
+                    context.close()
+            downloaded_files: list[str] = []
+            empty_companies: list[str] = []
+            for company in _configured_companies(config):
+                context = browser.new_context(accept_downloads=True)
+                page = context.new_page()
+                try:
+                    _open_authenticated_session(page, config, password)
+                    downloaded = _download_existing_report(page, config, company)
+                    if downloaded:
+                        downloaded_files.append(str(downloaded))
+                        logging.info("Reporte de Mercury descargado para %s: %s", company, downloaded)
+                    else:
+                        empty_companies.append(company)
+                        logging.info("Mercury no descargo datos para %s.", company)
+                finally:
+                    context.close()
+            if not downloaded_files:
+                return MercuryRunResult(
+                    True,
+                    "Mercury no encontro nuevas entradas para las companias configuradas.",
+                    downloaded_files=[],
+                    companies_without_download=empty_companies,
+                )
             return MercuryRunResult(
                 True,
-                f"Mercury descargo el reporte {config.mercury_report_name}.",
-                downloaded_file=str(downloaded),
+                f"Mercury descargo {len(downloaded_files)} reporte(s).",
+                downloaded_file=downloaded_files[0],
+                downloaded_files=downloaded_files,
+                companies_without_download=empty_companies,
             )
         except PlaywrightTimeoutError as exc:
             raise MercuryAutomationError(f"Mercury tardo demasiado en responder: {exc}") from exc
         finally:
-            context.close()
             browser.close()
+
+
+def _open_authenticated_session(page, config: AppConfig, password: str) -> None:
+    page.goto(config.mercury_url, wait_until="domcontentloaded", timeout=60_000)
+    _fill_login_form(page, config.mercury_username, password)
 
 
 def _fill_login_form(page, username: str, password: str) -> None:
@@ -101,8 +133,8 @@ def _fill_login_form(page, username: str, password: str) -> None:
     _wait_for_post_login_page(page)
 
 
-def _download_existing_report(page, config: AppConfig) -> Path:
-    _select_company(page, config.mercury_company)
+def _download_existing_report(page, config: AppConfig, company_name: str) -> Path | None:
+    _select_company(page, company_name)
     _open_human_resources(page)
     page.goto(_report_generator_url(config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
     _raise_if_not_authenticated(page)
@@ -111,18 +143,75 @@ def _download_existing_report(page, config: AppConfig) -> Path:
     _click_selector_or_text(page, "#ctl00_MainContent_cmdAceptarReporte", "Aceptar")
     page.wait_for_load_state("domcontentloaded", timeout=15_000)
     _click_text(page, "Ver reporte")
+    page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    if _wait_for_no_records(page, timeout=8_000):
+        logging.info("Mercury no encontro registros para %s.", company_name)
+        return None
 
     downloads = Path(config.downloads_folder)
     for name in EXPORT_NAMES:
         (downloads / name).unlink(missing_ok=True)
 
-    with page.expect_download(timeout=60_000) as download_info:
-        _click_text(page, "Exportar")
-    download = download_info.value
+    try:
+        with page.expect_download(timeout=15_000) as download_info:
+            _click_text(page, "Exportar")
+        download = download_info.value
+    except Exception:
+        if _page_has_no_records(page):
+            return None
+        raise
     suffix = Path(download.suggested_filename or "").suffix or ".xlsx"
-    target = downloads / f"GridViewExport{suffix}"
+    target = downloads / f"GridViewExport_{_company_file_label(company_name)}{suffix}"
     download.save_as(target)
     return target
+
+
+def _configured_companies(config: AppConfig) -> list[str]:
+    raw = config.mercury_companies or config.mercury_company
+    companies = [part.strip() for part in re.split(r"[;\n,]+", raw) if part.strip()]
+    if not companies and config.mercury_company.strip():
+        companies.append(config.mercury_company.strip())
+    return companies or ["Supermercado Ines"]
+
+
+def _company_file_label(company_name: str) -> str:
+    normalized = company_name.casefold()
+    if "ines" in normalized:
+        return "Ines"
+    if "brother" in normalized:
+        return "Brothers"
+    value = re.sub(r"[^A-Za-z0-9]+", "_", company_name).strip("_")
+    return value or "Mercury"
+
+
+def _page_has_no_records(page) -> bool:
+    for frame in page.frames:
+        try:
+            text = frame.locator("body").inner_text(timeout=1_000).casefold()
+            if any(message in text for message in _NO_RECORDS_MESSAGES):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+_NO_RECORDS_MESSAGES = (
+    "no existen registros",
+    "no existen datos",
+    "no data",
+    "sin registros",
+)
+
+
+def _wait_for_no_records(page, timeout: int = 5_000) -> bool:
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        if _page_has_no_records(page):
+            return True
+        page.wait_for_timeout(step)
+        elapsed += step
+    return False
 
 
 def _select_company(page, company_name: str) -> None:
@@ -130,13 +219,53 @@ def _select_company(page, company_name: str) -> None:
         return
     _wait_for_post_login_page(page)
     select = page.locator("select").first
-    try:
-        if select.count() and select.is_visible(timeout=5_000):
-            select.select_option(label=company_name)
-            page.wait_for_timeout(1_000)
-            page.wait_for_load_state("domcontentloaded", timeout=10_000)
-    except Exception:
-        logging.info("No se selecciono compania en pantalla inicial; se continua con la sesion actual.")
+    if not select.count() or not select.is_visible(timeout=5_000):
+        raise MercuryAutomationError("Mercury no mostro el selector de compania.")
+
+    result = select.evaluate(
+        """
+        (select, companyName) => {
+            const wanted = companyName.trim().toLocaleLowerCase();
+            const options = Array.from(select.options).map((option) => ({
+                value: option.value,
+                text: option.textContent.trim(),
+            }));
+            const selectable = options.filter((option) => {
+                const text = option.text.toLocaleLowerCase();
+                return text && text !== "seleccione";
+            });
+            const match =
+                selectable.find((option) => option.text.toLocaleLowerCase() === wanted) ||
+                selectable.find((option) => option.text.toLocaleLowerCase().includes(wanted)) ||
+                selectable.find((option) => wanted.includes(option.text.toLocaleLowerCase()));
+            if (!match) {
+                return {
+                    ok: false,
+                    selectedText: select.options[select.selectedIndex]?.textContent.trim() || "",
+                    options: selectable.map((option) => option.text),
+                };
+            }
+            select.value = match.value;
+            select.dispatchEvent(new Event("input", { bubbles: true }));
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+            return {
+                ok: true,
+                selectedText: match.text,
+                options: selectable.map((option) => option.text),
+            };
+        }
+        """,
+        company_name,
+    )
+    if not result.get("ok"):
+        options = ", ".join(result.get("options") or [])
+        raise MercuryAutomationError(
+            f"Mercury no encontro la compania '{company_name}' en el selector. Opciones disponibles: {options}"
+        )
+
+    page.wait_for_timeout(1_500)
+    page.wait_for_load_state("domcontentloaded", timeout=10_000)
+    logging.info("Compania Mercury seleccionada: %s", result.get("selectedText") or company_name)
 
 
 def _wait_for_post_login_page(page) -> None:

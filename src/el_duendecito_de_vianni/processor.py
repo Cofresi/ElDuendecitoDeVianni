@@ -12,7 +12,7 @@ from .importer import find_export, import_export
 from .processed_store import ProcessedStore, file_sha256
 from .spreadsheet import read_employees
 from .templates import process_template_copy
-from .utils import employee_folder_name, safe_filename, sorted_templates, template_folder_for_employee
+from .utils import company_template_subfolder, employee_folder_name, safe_filename, sorted_templates, template_folder_for_employee
 from .work_schedule import WorkScheduleLookup, add_work_schedule_sentence
 
 
@@ -67,7 +67,7 @@ class DocumentProcessor:
         spreadsheet = Path(spreadsheet_path)
         employees = read_employees(spreadsheet)
         date_text = datetime.now(DR_TZ).strftime("%d.%m.%Y")
-        final_output = Path(self.config.output_folder) / f"nuevasEntradas_{date_text}"
+        final_output = Path(self.config.output_folder) / f"nuevasEntradas_{date_text}" / _run_company_folder(employees)
         temp_output = final_output.with_name(final_output.name + "_tmp")
         if temp_output.exists():
             shutil.rmtree(temp_output)
@@ -116,3 +116,9 @@ class DocumentProcessor:
             f"y genero {report.document_count} documentos."
         )
         return report
+
+
+def _run_company_folder(employees: list[dict[str, str]]) -> str:
+    if not employees:
+        return "Brothers"
+    return company_template_subfolder(employees[0])

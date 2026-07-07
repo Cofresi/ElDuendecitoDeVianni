@@ -34,6 +34,7 @@ from .logging_utils import configure_logging
 from .mercury import MercuryAutomationError, run_mercury_export
 from .office import open_folder, print_file, set_start_with_windows
 from .processor import DocumentProcessor, RunReport
+from .spreadsheet import has_employee_rows
 
 
 APP_STYLESHEET = """
@@ -209,6 +210,7 @@ class ConfigDialog(QDialog):
         self.mercury_url = QLineEdit(config.mercury_url)
         self.mercury_username = QLineEdit(config.mercury_username)
         self.mercury_company = QLineEdit(config.mercury_company)
+        self.mercury_companies = QLineEdit(config.mercury_companies)
         self.mercury_report_name = QLineEdit(config.mercury_report_name)
         self.mercury_password = QLineEdit()
         self.mercury_password.setEchoMode(QLineEdit.EchoMode.Password)
@@ -236,7 +238,7 @@ class ConfigDialog(QDialog):
         layout.addRow("Tabla de horarios", self.work_schedule_lookup)
         layout.addRow("Mercury URL", self.mercury_url)
         layout.addRow("Usuario Mercury", self.mercury_username)
-        layout.addRow("Compania Mercury", self.mercury_company)
+        layout.addRow("Companias Mercury", self.mercury_companies)
         layout.addRow("Reporte Mercury", self.mercury_report_name)
         layout.addRow("Contrasena Mercury", self.mercury_password)
         layout.addRow(self.mercury_headless)
@@ -309,7 +311,8 @@ class ConfigDialog(QDialog):
             work_schedule_lookup=self.work_schedule_lookup.edit.text(),  # type: ignore[attr-defined]
             mercury_url=self.mercury_url.text(),
             mercury_username=self.mercury_username.text(),
-            mercury_company=self.mercury_company.text(),
+            mercury_company=self.mercury_companies.text().split(";")[0].strip() or self.mercury_company.text(),
+            mercury_companies=self.mercury_companies.text(),
             mercury_report_name=self.mercury_report_name.text(),
             mercury_headless=self.mercury_headless.isChecked(),
             scan_interval_minutes=self.interval.value(),
@@ -523,11 +526,19 @@ class MainWindow(QMainWindow):
         try:
             result = run_mercury_export(self.config, load_mercury_password())
             self.append_log(result.message)
-            report = self.processor.process_export_file(
-                result.downloaded_file,
-                force=True,
-                delete_original=not self.config.ask_before_delete_original,
-            )
+            processed_reports: list[RunReport] = []
+            empty_files: list[str] = []
+            for downloaded_file in result.downloaded_files:
+                if has_employee_rows(downloaded_file):
+                    processed_reports.append(
+                        self.processor.process_export_file(
+                            downloaded_file,
+                            force=True,
+                            delete_original=not self.config.ask_before_delete_original,
+                        )
+                    )
+                else:
+                    empty_files.append(Path(downloaded_file).name)
         except MercuryAutomationError as exc:
             QMessageBox.warning(self, "Mercury necesita configuracion", str(exc))
             self.append_log(str(exc))
@@ -536,7 +547,16 @@ class MainWindow(QMainWindow):
             logging.exception("Error al usar Mercury")
             QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
             return
-        self.handle_report(report)
+        for company in result.companies_without_download:
+            self.append_log(f"Mercury no genero archivo para {company}.")
+        for filename in empty_files:
+            self.append_log(f"{filename} no tiene nuevas entradas.")
+        if not processed_reports:
+            QMessageBox.information(self, "Mercury", "No hay nuevas entradas para procesar.")
+            self.refresh_status()
+            return
+        for report in processed_reports:
+            self.handle_report(report)
 
     def start_monitoring(self) -> None:
         self.monitoring = True
