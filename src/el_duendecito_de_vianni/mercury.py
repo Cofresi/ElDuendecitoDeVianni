@@ -202,6 +202,10 @@ _NO_RECORDS_MESSAGES = (
     "sin registros",
 )
 
+_COMPANY_LABELS = ("Compañía", "Compania", "Company")
+_HUMAN_RESOURCES_LABELS = ("Administración Recursos Humanos", "Administracion Recursos Humanos", "Human Resources Management")
+_POST_HR_MARKERS = ("Principal", "Generador de Reportes", "Recursos Humanos")
+
 
 def _wait_for_no_records(page, timeout: int = 5_000) -> bool:
     elapsed = 0
@@ -269,23 +273,24 @@ def _select_company(page, company_name: str) -> None:
 
 
 def _wait_for_post_login_page(page) -> None:
-    try:
-        page.get_by_text("Company", exact=True).wait_for(timeout=20_000)
+    if _wait_for_any_text(page, _COMPANY_LABELS, timeout=20_000):
         return
-    except Exception:
-        pass
-    try:
-        page.get_by_text("Human Resources Management", exact=True).wait_for(timeout=10_000)
+    if _wait_for_any_text(page, _HUMAN_RESOURCES_LABELS, timeout=10_000):
         return
-    except Exception as exc:
-        raise MercuryAutomationError("Mercury no mostro la pagina inicial despues de iniciar sesion.") from exc
+    raise MercuryAutomationError("Mercury no mostro la pagina inicial despues de iniciar sesion.")
 
 
 def _open_human_resources(page) -> None:
-    _click_tile_by_text(page, "Human Resources Management")
+    _click_tile_by_any_text(page, _HUMAN_RESOURCES_LABELS)
     try:
         page.wait_for_function(
-            "() => location.href.includes('Mercury.RRHH') || document.body.innerText.includes('Principal')",
+            """
+            (markers) => {
+                const text = document.body.innerText || "";
+                return location.href.includes("Mercury.RRHH") || markers.some((marker) => text.includes(marker));
+            }
+            """,
+            list(_POST_HR_MARKERS),
             timeout=20_000,
         )
     except Exception as exc:
@@ -315,6 +320,32 @@ def _report_generator_url(login_url: str) -> str:
 
 def _click_text(page, text: str) -> None:
     page.get_by_text(text, exact=True).click(timeout=20_000)
+
+
+def _wait_for_any_text(page, texts: tuple[str, ...], timeout: int) -> bool:
+    step = 500
+    elapsed = 0
+    while elapsed <= timeout:
+        for text in texts:
+            try:
+                if page.get_by_text(text, exact=True).first.is_visible(timeout=500):
+                    return True
+            except Exception:
+                continue
+        elapsed += step
+    return False
+
+
+def _click_tile_by_any_text(page, texts: tuple[str, ...]) -> None:
+    last_error: Exception | None = None
+    for text in texts:
+        try:
+            _click_tile_by_text(page, text)
+            return
+        except Exception as exc:
+            last_error = exc
+    options = ", ".join(texts)
+    raise MercuryAutomationError(f"Mercury no abrio ninguna de estas opciones: {options}") from last_error
 
 
 def _click_selector_or_text(page, selector: str, text: str) -> None:
@@ -399,7 +430,13 @@ def _click_tile_by_text(page, text: str) -> None:
         page.mouse.click(point["x"], point["y"])
         try:
             page.wait_for_function(
-                "() => location.href.includes('Mercury.RRHH') || document.body.innerText.includes('Principal')",
+                """
+                (markers) => {
+                    const text = document.body.innerText || "";
+                    return location.href.includes("Mercury.RRHH") || markers.some((marker) => text.includes(marker));
+                }
+                """,
+                list(_POST_HR_MARKERS),
                 timeout=4_000,
             )
             return
