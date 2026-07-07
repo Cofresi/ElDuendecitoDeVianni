@@ -287,20 +287,11 @@ def _wait_for_post_login_page(page) -> None:
 
 
 def _open_human_resources(page) -> None:
+    if _is_human_resources_page(page):
+        return
     _click_tile_by_any_text(page, _HUMAN_RESOURCES_LABELS)
-    try:
-        page.wait_for_function(
-            """
-            (markers) => {
-                const text = document.body.innerText || "";
-                return location.href.includes("Mercury.RRHH") || markers.some((marker) => text.includes(marker));
-            }
-            """,
-            list(_POST_HR_MARKERS),
-            timeout=20_000,
-        )
-    except Exception as exc:
-        raise MercuryAutomationError("Mercury no abrio el modulo de Recursos Humanos.") from exc
+    if not _wait_for_human_resources_page(page, timeout=20_000):
+        raise MercuryAutomationError("Mercury no abrio el modulo de Recursos Humanos.")
     _raise_if_not_authenticated(page)
 
 
@@ -343,6 +334,8 @@ def _wait_for_any_text(page, texts: tuple[str, ...], timeout: int) -> bool:
 
 
 def _click_tile_by_any_text(page, texts: tuple[str, ...]) -> None:
+    if _is_human_resources_page(page):
+        return
     last_error: Exception | None = None
     for text in texts:
         try:
@@ -354,6 +347,27 @@ def _click_tile_by_any_text(page, texts: tuple[str, ...]) -> None:
             last_error = exc
     options = ", ".join(texts)
     raise MercuryAutomationError(f"Mercury no abrio ninguna de estas opciones: {options}") from last_error
+
+
+def _is_human_resources_page(page) -> bool:
+    if "mercury.rrhh" in page.url.casefold():
+        return True
+    try:
+        body = page.locator("body").inner_text(timeout=1_000).casefold()
+    except Exception:
+        return False
+    return any(marker.casefold() in body for marker in _POST_HR_MARKERS)
+
+
+def _wait_for_human_resources_page(page, timeout: int = 20_000) -> bool:
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        if _is_human_resources_page(page):
+            return True
+        page.wait_for_timeout(step)
+        elapsed += step
+    return False
 
 
 def _click_selector_or_text(page, selector: str, text: str) -> None:
