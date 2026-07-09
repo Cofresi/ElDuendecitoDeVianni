@@ -666,6 +666,8 @@ def _click_tile_by_text(page, text: str) -> None:
                 .trim()
                 .toLocaleLowerCase();
             const wanted = normalize(wantedText);
+            const wantedTokens = wanted.split(" ").filter(Boolean);
+            const matchesWanted = (text) => text.includes(wanted) || wantedTokens.every((token) => text.includes(token));
             const visible = (element) => {
                 const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
@@ -674,7 +676,7 @@ def _click_tile_by_text(page, text: str) -> None:
             const matches = Array.from(document.querySelectorAll("*"))
                 .filter((element) => visible(element))
                 .map((element) => ({ element, rect: element.getBoundingClientRect(), text: normalize(element.innerText || element.textContent) }))
-                .filter((item) => item.text.includes(wanted))
+                .filter((item) => matchesWanted(item.text))
                 .filter((item) => item.rect.width < 700 && item.rect.height < 400)
                 .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
             if (!matches.length) {
@@ -682,26 +684,43 @@ def _click_tile_by_text(page, text: str) -> None:
             }
             let node = matches[0].element;
             const points = [];
+            const seen = new Set();
+            const addPoint = (rect) => {
+                const x = Math.round(rect.left + rect.width / 2);
+                const y = Math.round(rect.top + rect.height / 2);
+                const key = `${x}:${y}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    points.push({ x, y });
+                }
+            };
             let element = node;
             for (let i = 0; i < 12 && element; i += 1) {
                 const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                const tag = element.tagName.toLowerCase();
+                if (
+                    tag === "a" ||
+                    tag === "button" ||
+                    element.onclick ||
+                    element.getAttribute("role") === "button" ||
+                    style.cursor === "pointer"
+                ) {
+                    addPoint(rect);
+                }
                 if (rect.width >= 180 && rect.height >= 120) {
-                    points.push({
-                        x: rect.left + rect.width / 2,
-                        y: rect.top + rect.height / 2,
-                    });
+                    addPoint(rect);
                 }
                 element = element.parentElement;
             }
             const label = node.getBoundingClientRect();
-            points.push({
-                x: label.left + label.width / 2,
-                y: Math.max(10, label.top - 120),
+            addPoint({
+                left: label.left,
+                top: Math.max(10, label.top - 120),
+                width: label.width,
+                height: 1,
             });
-            points.push({
-                x: label.left + label.width / 2,
-                y: label.top + label.height / 2,
-            });
+            addPoint(label);
             return points;
         }
         """,
@@ -717,11 +736,11 @@ def _click_tile_by_text(page, text: str) -> None:
                 """
                 (markers) => {
                     const text = document.body.innerText || "";
-                    return location.href.includes("Mercury.RRHH") || markers.some((marker) => text.includes(marker));
+                    return location.href.toLocaleLowerCase().includes("mercury.rrhh") || markers.some((marker) => text.includes(marker));
                 }
                 """,
                 list(_POST_HR_MARKERS),
-                timeout=4_000,
+                timeout=8_000,
             )
             return
         except Exception:
