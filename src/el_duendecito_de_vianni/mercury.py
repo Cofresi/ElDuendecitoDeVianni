@@ -319,7 +319,7 @@ def _open_report_generator(page, config: AppConfig) -> None:
     if _try_open_report_generator_from_menu(page):
         return
     if _is_human_resources_page(page):
-        page.goto(_report_generator_url(page.url or config.mercury_url), wait_until="domcontentloaded", timeout=60_000)
+        _goto_mercury_page(page, _report_generator_url(page.url or config.mercury_url))
         _raise_if_not_authenticated(page)
         if _is_report_generator_page(page):
             return
@@ -388,6 +388,16 @@ def _wait_for_report_generator_page(page, timeout: int = 10_000) -> bool:
         page.wait_for_timeout(step)
         elapsed += step
     return False
+
+
+def _goto_mercury_page(page, url: str) -> None:
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    except Exception as exc:
+        if "net::ERR_ABORTED" not in str(exc):
+            raise
+        logging.info("Mercury cancelo una navegacion directa, se valida la pagina actual: %s", url)
+        page.wait_for_timeout(2_000)
 
 
 def _click_any_visible_text(page, texts: tuple[str, ...], timeout: int = 5_000) -> bool:
@@ -582,9 +592,11 @@ def _click_tile_by_any_text(page, texts: tuple[str, ...]) -> None:
             _click_tile_by_text(page, text)
             return
         except Exception as exc:
-            if "Mercury.RRHH" in page.url:
+            if _wait_for_human_resources_page(page, timeout=8_000):
                 return
             last_error = exc
+    if _click_first_management_tile(page):
+        return
     options = ", ".join(texts)
     raise MercuryAutomationError(f"Mercury no abrio ninguna de estas opciones: {options}") from last_error
 
@@ -747,6 +759,65 @@ def _click_tile_by_text(page, text: str) -> None:
             continue
 
     raise MercuryAutomationError(f"Mercury no abrio la opcion {text}.")
+
+
+def _click_first_management_tile(page) -> bool:
+    try:
+        points = page.evaluate(
+            """
+            () => {
+                const visible = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+                };
+                const candidates = Array.from(document.querySelectorAll("*"))
+                    .filter((element) => visible(element))
+                    .map((element) => {
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            x: Math.round(rect.left + rect.width / 2),
+                            y: Math.round(rect.top + rect.height / 2),
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    })
+                    .filter((item) => item.width >= 180 && item.width <= 520)
+                    .filter((item) => item.height >= 180 && item.height <= 420)
+                    .filter((item) => item.left >= 20 && item.left < 520)
+                    .filter((item) => item.top >= 250 && item.top < 760)
+                    .sort((a, b) => (a.top - b.top) || (a.left - b.left));
+                return candidates.map((item) => ({ x: item.x, y: item.y }));
+            }
+            """
+        )
+    except Exception:
+        return _wait_for_human_resources_page(page, timeout=8_000)
+
+    for point in points:
+        try:
+            page.mouse.click(point["x"], point["y"])
+        except Exception:
+            if _wait_for_human_resources_page(page, timeout=8_000):
+                return True
+            continue
+        try:
+            page.wait_for_function(
+                """
+                (markers) => {
+                    const text = document.body.innerText || "";
+                    return location.href.toLocaleLowerCase().includes("mercury.rrhh") || markers.some((marker) => text.includes(marker));
+                }
+                """,
+                list(_POST_HR_MARKERS),
+                timeout=8_000,
+            )
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def _first_visible(page, selectors: list[str], required: bool = True):
