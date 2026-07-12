@@ -6,7 +6,7 @@ import re
 from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from .config import AppConfig
 from .importer import EXPORT_NAMES
@@ -145,9 +145,16 @@ def _download_existing_report(
     _open_saved_report(page, config.mercury_report_name)
     if report_date:
         _apply_report_date_filter(page, report_date)
-    _click_text(page, "Ver reporte")
+    process_button = page.locator("#ctl00_MainContent_lnkProcesar").first
+    if process_button.count():
+        process_button.wait_for(state="visible", timeout=8_000)
+        if not process_button.is_enabled():
+            raise MercuryAutomationError("Mercury no habilito Ver reporte despues de aplicar los filtros.")
+        process_button.click(timeout=8_000)
+    else:
+        _click_text(page, "Ver reporte")
     page.wait_for_load_state("domcontentloaded", timeout=15_000)
-    if _wait_for_no_records(page, timeout=8_000):
+    if _wait_for_report_result(page, timeout=10_000):
         logging.info("Mercury no encontro registros para %s.", company_name)
         return None
 
@@ -170,13 +177,26 @@ def _download_existing_report(
 
 
 def _open_saved_report(page, report_name: str) -> None:
-    _click_text(page, "Abrir reporte existente")
-    _click_text(page, report_name)
+    open_button = page.locator("#ctl00_MainContent_btnAbrirReporte").first
+    if open_button.count():
+        open_button.click(timeout=8_000)
+    else:
+        _click_text(page, "Abrir reporte existente")
+    report_list = page.locator("#ctl00_MainContent_lstReportes").first
+    if report_list.count():
+        report_list.select_option(report_name)
+    else:
+        _click_text(page, report_name)
     _click_selector_or_text(page, "#ctl00_MainContent_cmdAceptarReporte", "Aceptar")
     page.wait_for_load_state("domcontentloaded", timeout=15_000)
-    if not _wait_for_saved_report_dialog_closed(page, timeout=5_000):
-        logging.info("Mercury no confirmo el cierre del selector; se continua porque la pagina del reporte ya esta visible.")
-    page.wait_for_timeout(1_500)
+    try:
+        page.wait_for_function(
+            """(name) => document.querySelector('#ctl00_MainContent_txtNombreReporte')?.value === name""",
+            report_name,
+            timeout=10_000,
+        )
+    except Exception:
+        logging.info("Mercury no confirmo el nombre del reporte mediante el campo directo; se continua.")
     logging.info("Reporte Mercury abierto: %s", report_name)
 
 
@@ -278,7 +298,20 @@ def _format_mercury_date(value: date) -> str:
 
 
 def _apply_report_date_filter(page, report_date: date) -> None:
-    if not _click_any_visible_text(page, ("Filtros", "Filters"), timeout=3_000):
+    filter_tab = page.locator("#__tab_ctl00_MainContent_tabGeneral_ctl03").first
+    if filter_tab.count():
+        filter_tab.click(timeout=5_000)
+        try:
+            page.wait_for_function(
+                """() => {
+                    const state = document.querySelector('#ctl00_MainContent_tabGeneral_ClientState');
+                    return state && JSON.parse(state.value || '{}').ActiveTabIndex === 3;
+                }""",
+                timeout=8_000,
+            )
+        except Exception:
+            logging.info("Mercury no confirmo el indice activo de Filtros; se valida el panel directamente.")
+    elif not _click_any_visible_text(page, ("Filtros", "Filters"), timeout=3_000):
         raise MercuryAutomationError("Mercury no mostro la pestana Filtros para ajustar la Fecha Ingreso.")
     display_date = _format_mercury_date(report_date)
     try:
@@ -304,7 +337,12 @@ def _apply_report_date_filter(page, report_date: date) -> None:
             if operation.input_value() != operation_name:
                 operation.select_option(operation_name)
                 page.wait_for_timeout(1_000)
+            value.click()
             value.fill(display_date)
+            value.press("Tab")
+            if value.input_value() != display_date:
+                raise MercuryAutomationError(f"Mercury no mantuvo la fecha {display_date} en {value.get_attribute('id')}.")
+        page.wait_for_timeout(300)
         logging.info("Filtro Fecha Ingreso Mercury aplicado: %s desde/hasta.", display_date)
         return
     except Exception as exc:
@@ -511,6 +549,30 @@ def _wait_for_no_records(page, timeout: int = 5_000) -> bool:
     return False
 
 
+def _wait_for_report_result(page, timeout: int = 10_000) -> bool:
+    """Return True for no records, or continue as soon as Exportar is ready."""
+    elapsed = 0
+    step = 250
+    while elapsed <= timeout:
+        if _page_has_no_records(page):
+            return True
+        export_button = page.locator("#ctl00_MainContent_lnkExportar").first
+        try:
+            if export_button.count() and export_button.is_visible(timeout=100) and export_button.is_enabled():
+                return False
+        except Exception:
+            pass
+        try:
+            export_text = page.get_by_text("Exportar", exact=True).first
+            if export_text.is_visible(timeout=100) and export_text.is_enabled():
+                return False
+        except Exception:
+            pass
+        page.wait_for_timeout(step)
+        elapsed += step
+    return False
+
+
 def _select_company(page, company_name: str) -> None:
     if not company_name:
         return
@@ -576,8 +638,17 @@ def _wait_for_post_login_page(page) -> None:
 def _open_human_resources(page) -> None:
     if _is_human_resources_page(page):
         return
-    _click_tile_by_any_text(page, _HUMAN_RESOURCES_LABELS)
-    if not _wait_for_human_resources_page(page, timeout=20_000):
+    direct_button = page.locator("#ContentPlaceHolder1_cmdRecursosHumanos").first
+    try:
+        if direct_button.count() and direct_button.is_visible(timeout=2_000):
+            direct_button.click(timeout=8_000)
+            logging.info("Mercury: modulo Recursos Humanos abierto mediante selector directo.")
+        else:
+            _click_tile_by_any_text(page, _HUMAN_RESOURCES_LABELS)
+    except Exception:
+        logging.info("No se pudo usar el selector directo de Recursos Humanos; se usa la busqueda por texto.")
+        _click_tile_by_any_text(page, _HUMAN_RESOURCES_LABELS)
+    if not _wait_for_human_resources_page(page, timeout=15_000):
         raise MercuryAutomationError("Mercury no abrio el modulo de Recursos Humanos.")
     _raise_if_not_authenticated(page)
 
@@ -619,6 +690,24 @@ def _is_report_generator_page(page) -> bool:
 
 
 def _try_open_report_generator_from_menu(page) -> bool:
+    direct_link = page.locator("#ctl00_rh_cap24").first
+    try:
+        if direct_link.count():
+            href = direct_link.get_attribute("href")
+            if href and not href.casefold().startswith("javascript:"):
+                _goto_mercury_page(page, urljoin(page.url, href))
+                logging.info("Mercury: Generador de reportes abierto mediante href directo.")
+                if _wait_for_report_generator_page(page, timeout=8_000):
+                    return True
+            if not direct_link.is_visible(timeout=1_000):
+                _open_left_navigation(page)
+            direct_link.click(timeout=8_000, force=True)
+            logging.info("Mercury: Generador de reportes abierto mediante selector directo.")
+            if _wait_for_report_generator_page(page, timeout=12_000):
+                return True
+    except Exception:
+        logging.info("No se pudo usar el selector directo de Generador de reportes; se usa la busqueda por menu.")
+
     if _click_any_visible_text(page, _REPORT_GENERATOR_LABELS, timeout=2_000):
         return _wait_for_report_generator_page(page, timeout=10_000)
 
