@@ -256,6 +256,13 @@ def test_missing_placeholder_is_left_and_reported(tmp_path: Path) -> None:
     assert "{{Campo Inexistente}}" in text
 
 
+def test_missing_photo_placeholder_is_cleared_without_warning() -> None:
+    missing: set[str] = set()
+
+    assert replace_placeholders("Foto: {{Foto}}", {}, missing) == "Foto: "
+    assert not missing
+
+
 def test_placeholder_split_across_word_runs(tmp_path: Path) -> None:
     path = tmp_path / "split.docx"
     document = Document()

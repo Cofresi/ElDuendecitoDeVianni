@@ -131,6 +131,8 @@ def replace_placeholders(text: str, values: dict[str, str], missing: set[str]) -
     def repl(match: re.Match[str]) -> str:
         key, formatter = _parse_placeholder(match.group(1))
         if key not in values:
+            if key.casefold() == "foto":
+                return ""
             missing.add(key)
             return match.group(0)
         return _format_placeholder_value(values.get(key, ""), formatter)
