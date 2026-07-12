@@ -115,8 +115,9 @@ class DocumentProcessor:
         )
         if report.missing_placeholders:
             logging.warning("Campos faltantes: %s", ", ".join(sorted(report.missing_placeholders)))
+        company_name = _display_company_name(employees)
         report.message = (
-            f"El duendecito de Vianni termino de procesar {report.employees_processed} nuevos empleados "
+            f"El duendecito de Vianni termino de procesar {report.employees_processed} nuevos empleados de {company_name} "
             f"y genero {report.document_count} documentos."
         )
         return report
@@ -126,3 +127,7 @@ def _run_company_folder(employees: list[dict[str, str]]) -> str:
     if not employees:
         return "Brothers"
     return company_template_subfolder(employees[0])
+
+
+def _display_company_name(employees: list[dict[str, str]]) -> str:
+    return "Supermercado Ines" if _run_company_folder(employees) == "Ines" else "Brothers & Investments"

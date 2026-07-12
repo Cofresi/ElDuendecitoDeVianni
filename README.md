@@ -4,7 +4,7 @@ Aplicacion local de Windows para preparar automaticamente documentos de nuevos e
 
 ## Que hace
 
-La aplicacion vigila la carpeta Descargas y busca estos archivos:
+La aplicacion procesa los archivos descargados desde Mercury cuando el usuario inicia el flujo `Entradas`:
 
 - `GridViewExports.xls`
 - `GridViewExport.xls`
@@ -139,9 +139,7 @@ Al iniciar, la aplicacion queda minimizada en la bandeja del sistema. El boton X
 El menu de la bandeja incluye:
 
 - Abrir El duendecito de Vianni
-- Procesar ahora
-- Iniciar monitoreo
-- Detener monitoreo
+- Entradas
 - Abrir carpeta de salida
 - Configuracion
 - Ver registro

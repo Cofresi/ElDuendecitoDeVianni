@@ -556,3 +556,18 @@ def test_company_template_subfolder_mapping() -> None:
     assert company_template_subfolder({"Compania": "Supermercado Ines"}) == "Ines"
     assert company_template_subfolder({"Compania": "Supermercado Inés"}) == "Brothers"
     assert company_template_subfolder({"Compania": ""}) == "Brothers"
+
+
+def test_processing_message_includes_company_name(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ines_folder = Path(config.template_folder) / "Ines"
+    ines_folder.mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Compania": "Supermercado Ines"}],
+    )
+    make_docx(ines_folder / "01_Ines.docx", "{{Nombre Empleado}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    assert "nuevos empleados de Supermercado Ines" in report.message

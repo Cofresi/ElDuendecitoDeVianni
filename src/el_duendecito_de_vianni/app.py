@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QLockFile, QPoint, QStandardPaths, QObject, QThread, QTimer, Qt, Signal, Slot
@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QSpinBox,
     QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
@@ -330,11 +329,6 @@ class ConfigDialog(QDialog):
             self.mercury_password.setPlaceholderText("Contrasena de Mercury")
         self.mercury_headless = QCheckBox("Ejecutar Mercury invisible")
         self.mercury_headless.setChecked(config.mercury_headless)
-        self.interval = QSpinBox()
-        self.interval.setRange(1, 1440)
-        self.interval.setValue(config.scan_interval_minutes)
-        self.ask_delete = QCheckBox("Preguntar antes de borrar el archivo descargado")
-        self.ask_delete.setChecked(config.ask_before_delete_original)
         self.start_minimized = QCheckBox("Iniciar minimizado en la bandeja del sistema")
         self.start_minimized.setChecked(config.start_minimized_to_tray)
         self.start_windows = QCheckBox("Iniciar automaticamente con Windows")
@@ -352,9 +346,7 @@ class ConfigDialog(QDialog):
         layout.addRow("Reporte Mercury", self.mercury_report_name)
         layout.addRow("Contrasena Mercury", self.mercury_password)
         layout.addRow(self.mercury_headless)
-        layout.addRow("Intervalo (minutos)", self.interval)
         layout.addRow("Impresora", self.printer)
-        layout.addRow(self.ask_delete)
         layout.addRow(self.start_minimized)
         layout.addRow(self.start_windows)
         buttons = QHBoxLayout()
@@ -425,8 +417,8 @@ class ConfigDialog(QDialog):
             mercury_companies=self.mercury_companies.text(),
             mercury_report_name=self.mercury_report_name.text(),
             mercury_headless=self.mercury_headless.isChecked(),
-            scan_interval_minutes=self.interval.value(),
-            ask_before_delete_original=self.ask_delete.isChecked(),
+            scan_interval_minutes=self.config.scan_interval_minutes,
+            ask_before_delete_original=self.config.ask_before_delete_original,
             selected_printer=self.printer.currentText(),
             start_minimized_to_tray=self.start_minimized.isChecked(),
             start_with_windows=self.start_windows.isChecked(),
@@ -445,7 +437,6 @@ class MainWindow(QMainWindow):
         self.last_spreadsheet = ""
         self.last_employees = 0
         self.dance_frame = 0
-        self.monitoring = config.monitoring_enabled
         self.exiting = False
         self.mercury_thread: QThread | None = None
         self.mercury_worker: MercuryWorker | None = None
@@ -467,11 +458,8 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(make_icon())
         self._build_ui()
         self._build_tray()
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.scan_now)
         self.dance_timer = QTimer(self)
         self.dance_timer.timeout.connect(self._advance_dancing_elf)
-        self._sync_timer()
         self.refresh_status()
         QTimer.singleShot(1200, self.show_startup_greeting)
 
@@ -528,13 +516,10 @@ class MainWindow(QMainWindow):
         advanced_layout.addWidget(self.log_area)
         buttons = QHBoxLayout()
         for text, callback in (
-            ("Procesar archivo", self.scan_now),
             ("Plantillas", lambda: open_folder(self.config.template_folder)),
-            ("Salida", lambda: open_folder(self.config.output_folder)),
+            ("Documentos", lambda: open_folder(self.config.output_folder)),
             ("Configuracion", self.open_config),
             ("Registro", self.open_log),
-            ("Iniciar", self.start_monitoring),
-            ("Detener", self.stop_monitoring),
         ):
             button = QPushButton(text)
             button.clicked.connect(callback)
@@ -577,15 +562,12 @@ class MainWindow(QMainWindow):
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(make_icon(), self)
-        self.tray.setToolTip("El duendecito de Vianni - vigilando nuevas entradas")
+        self.tray.setToolTip("El duendecito de Vianni - listo para Entradas y Salidas")
         menu = QMenu()
         actions = [
             ("Abrir El duendecito de Vianni", self.show_window),
             ("Entradas", self.run_entradas),
-            ("Procesar archivo de Descargas", self.scan_now),
-            ("Iniciar monitoreo", self.start_monitoring),
-            ("Detener monitoreo", self.stop_monitoring),
-            ("Abrir carpeta de salida", lambda: open_folder(self.config.output_folder)),
+            ("Documentos", lambda: open_folder(self.config.output_folder)),
             ("Configuracion", self.open_config),
             ("Ver registro", self.open_log),
             ("Salir", self.quit_app),
@@ -605,23 +587,13 @@ class MainWindow(QMainWindow):
     def show_startup_greeting(self) -> None:
         if not self.tray.isVisible():
             return
-        if self.monitoring:
-            message = "Estoy despierto y vigilando. Siempre chequeando si hay nuevos empleados. Todo esta funcionando bien."
-        else:
-            message = "Estoy listo en la bandeja. Puede iniciar el monitoreo cuando desee."
+        message = "Estoy despierto y listo para preparar Entradas o Salidas. Todo esta funcionando bien."
         self.tray.showMessage("El duendecito de Vianni", message, make_icon(), 6000)
 
-    def _sync_timer(self) -> None:
-        if self.monitoring:
-            self.timer.start(self.config.scan_interval_minutes * 60 * 1000)
-        else:
-            self.timer.stop()
-
     def refresh_status(self) -> None:
-        active = "activo" if self.monitoring else "inactivo"
-        charm = "Listo para ayudar" if self.monitoring else "Descansando en la bandeja"
         self.status.setText(
-            f"Estado del duendecito: {charm}\nMonitoreo: {active}\nUltimo escaneo: {self.last_scan}\n"
+            f"Estado del duendecito: Listo para ayudar\n"
+            f"Ultima ejecucion: {self.last_scan}\n"
             f"Ultimo archivo procesado: {self.last_spreadsheet or 'Ninguno'}\n"
             f"Empleados procesados en la ultima corrida: {self.last_employees}"
         )
@@ -674,23 +646,6 @@ class MainWindow(QMainWindow):
         self.dance_frame = (self.dance_frame + 1) % 2
         self.busy_elf.setPixmap(make_dancing_elf_frame(self.dance_frame))
 
-    def scan_now(self) -> None:
-        from datetime import datetime
-
-        self.last_scan = datetime.now().strftime("%d/%m/%Y %H:%M")
-        self.append_log("El duendecito esta revisando Descargas...")
-        self.set_progress(10, "Revisando archivo en Descargas...")
-        try:
-            report = self.processor.process_next_export(delete_original=not self.config.ask_before_delete_original)
-        except Exception as exc:
-            logging.exception("Error al procesar")
-            self.set_progress(0, "No se pudo procesar el archivo.")
-            QMessageBox.critical(self, "El duendecito necesita ayuda", f"No se pudo procesar el archivo.\n\n{exc}")
-            self.refresh_status()
-            return
-        self.set_progress(100, "Documentos generados.")
-        self.handle_report(report)
-
     def run_entradas(self) -> None:
         self.run_mercury(self._selected_entries_date())
 
@@ -708,7 +663,9 @@ class MainWindow(QMainWindow):
     def _selected_departures_date(self) -> date:
         return self.departures_date.date().toPython()
 
-    def handle_report(self, report: RunReport) -> None:
+    def handle_report(self, report: RunReport, ask_delete_original: bool | None = None) -> None:
+        if ask_delete_original is None:
+            ask_delete_original = self.config.ask_before_delete_original
         self.last_spreadsheet = report.imported_spreadsheet or report.source_spreadsheet
         self.last_employees = report.employees_processed
         self.append_log(report.message)
@@ -727,7 +684,7 @@ class MainWindow(QMainWindow):
                 open_response = QMessageBox.question(self, "Carpeta de salida", "Desea abrir la carpeta de salida?")
                 if open_response == QMessageBox.StandardButton.Yes:
                     open_folder(report.output_folder)
-            if self.config.ask_before_delete_original and report.source_spreadsheet:
+            if ask_delete_original and report.source_spreadsheet:
                 delete_response = QMessageBox.question(
                     self,
                     "Limpiar Descargas",
@@ -763,8 +720,6 @@ class MainWindow(QMainWindow):
             set_start_with_windows(self.config.start_with_windows)
             ensure_directories(self.config)
             self.processor = DocumentProcessor(self.config)
-            self.monitoring = self.config.monitoring_enabled
-            self._sync_timer()
             self.refresh_status()
 
     def open_log(self) -> None:
@@ -777,6 +732,7 @@ class MainWindow(QMainWindow):
             self.append_log("El duendecito ya esta trabajando con Mercury.")
             return
         self.append_log(f"El duendecito esta buscando entradas de {report_date:%d/%m/%Y} en Mercury...")
+        self.last_scan = datetime.now().strftime("%d/%m/%Y %H:%M")
         self.start_busy_progress("Entrando a Mercury y preparando la descarga...")
         self.mercury_busy = True
         self.mercury_report_date = report_date
@@ -826,12 +782,13 @@ class MainWindow(QMainWindow):
                         self.processor.process_export_file(
                             downloaded_file,
                             force=True,
-                            delete_original=not self.config.ask_before_delete_original,
+                            delete_original=True,
                             run_date=report_date,
                         )
                     )
                 else:
                     empty_files.append(Path(downloaded_file).name)
+                    Path(downloaded_file).unlink(missing_ok=True)
                 self.set_progress(45 + int(index / total_files * 45), f"Documentos procesados {index} de {total_files}.")
         except Exception as exc:
             self.mercury_busy = False
@@ -851,21 +808,8 @@ class MainWindow(QMainWindow):
             return
         self.set_progress(100, "Documentos generados.")
         for report in processed_reports:
-            self.handle_report(report)
+            self.handle_report(report, ask_delete_original=False)
         self.set_progress(100, "Trabajo terminado.")
-
-    def start_monitoring(self) -> None:
-        self.monitoring = True
-        self.config.monitoring_enabled = True
-        self._sync_timer()
-        self.tray.showMessage("El duendecito de Vianni", "El duendecito esta atento en Descargas.")
-        self.refresh_status()
-
-    def stop_monitoring(self) -> None:
-        self.monitoring = False
-        self.config.monitoring_enabled = False
-        self._sync_timer()
-        self.refresh_status()
 
     def show_window(self) -> None:
         self.show()
