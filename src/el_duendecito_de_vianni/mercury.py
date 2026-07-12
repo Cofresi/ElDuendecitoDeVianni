@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urlparse
+from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import AppConfig
 from .importer import EXPORT_NAMES
@@ -28,7 +29,9 @@ def run_mercury_login_test(config: AppConfig, password: str) -> MercuryRunResult
     return run_mercury_export(config, password, download_report=False)
 
 
-def run_mercury_export(config: AppConfig, password: str, download_report: bool = True) -> MercuryRunResult:
+def run_mercury_export(
+    config: AppConfig, password: str, download_report: bool = True, report_date: date | None = None
+) -> MercuryRunResult:
     if not config.mercury_url.strip():
         raise MercuryAutomationError("Configure primero la direccion de Mercury.")
     if not config.mercury_username.strip():
@@ -66,7 +69,7 @@ def run_mercury_export(config: AppConfig, password: str, download_report: bool =
                 page = context.new_page()
                 try:
                     _open_authenticated_session(page, config, password)
-                    downloaded = _download_existing_report(page, config, company)
+                    downloaded = _download_existing_report(page, config, company, report_date=report_date)
                     if downloaded:
                         downloaded_files.append(str(downloaded))
                         logging.info("Reporte de Mercury descargado para %s: %s", company, downloaded)
@@ -133,14 +136,15 @@ def _fill_login_form(page, username: str, password: str) -> None:
     _wait_for_post_login_page(page)
 
 
-def _download_existing_report(page, config: AppConfig, company_name: str) -> Path | None:
+def _download_existing_report(
+    page, config: AppConfig, company_name: str, report_date: date | None = None
+) -> Path | None:
     _select_company(page, company_name)
     _open_human_resources(page)
     _open_report_generator(page, config)
-    _click_text(page, "Abrir reporte existente")
-    _click_text(page, config.mercury_report_name)
-    _click_selector_or_text(page, "#ctl00_MainContent_cmdAceptarReporte", "Aceptar")
-    page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    _open_saved_report(page, config.mercury_report_name)
+    if report_date:
+        _apply_report_date_filter(page, report_date)
     _click_text(page, "Ver reporte")
     page.wait_for_load_state("domcontentloaded", timeout=15_000)
     if _wait_for_no_records(page, timeout=8_000):
@@ -163,6 +167,284 @@ def _download_existing_report(page, config: AppConfig, company_name: str) -> Pat
     target = downloads / f"GridViewExport_{_company_file_label(company_name)}{suffix}"
     download.save_as(target)
     return target
+
+
+def _open_saved_report(page, report_name: str) -> None:
+    _click_text(page, "Abrir reporte existente")
+    _click_text(page, report_name)
+    _click_selector_or_text(page, "#ctl00_MainContent_cmdAceptarReporte", "Aceptar")
+    page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    if not _wait_for_saved_report_dialog_closed(page, timeout=5_000):
+        logging.info("Mercury no confirmo el cierre del selector; se continua porque la pagina del reporte ya esta visible.")
+    page.wait_for_timeout(1_500)
+    logging.info("Reporte Mercury abierto: %s", report_name)
+
+
+def _select_saved_report(page, report_name: str, double_click: bool = False) -> bool:
+    return bool(
+        page.evaluate(
+            """
+            ({ reportName, doubleClick }) => {
+                const normalize = (value) => (value || "")
+                    .normalize("NFD")
+                    .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/\\s+/g, " ")
+                    .trim()
+                    .toLocaleLowerCase();
+                const wanted = normalize(reportName);
+                const visible = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+                };
+                const dispatch = (element, type) => {
+                    element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+                };
+
+                for (const select of Array.from(document.querySelectorAll("select")).filter(visible)) {
+                    const option = Array.from(select.options).find((item) => normalize(item.textContent) === wanted);
+                    if (option) {
+                        select.value = option.value;
+                        select.dispatchEvent(new Event("input", { bubbles: true }));
+                        select.dispatchEvent(new Event("change", { bubbles: true }));
+                        return true;
+                    }
+                }
+
+                const candidates = Array.from(document.querySelectorAll("option, li, tr, td, span, div, a"))
+                    .filter(visible)
+                    .map((element) => ({ element, text: normalize(element.innerText || element.textContent) }))
+                    .filter((item) => item.text === wanted)
+                    .sort((a, b) => {
+                        const ar = a.element.getBoundingClientRect();
+                        const br = b.element.getBoundingClientRect();
+                        return (ar.width * ar.height) - (br.width * br.height);
+                    });
+                if (!candidates.length) {
+                    return false;
+                }
+                const element = candidates[0].element;
+                const target = element.closest("option, li, tr, td, a, [onclick], [role='option'], [role='button']") || element;
+                target.focus?.();
+                dispatch(target, "mousedown");
+                dispatch(target, "mouseup");
+                target.click();
+                if (doubleClick) {
+                    dispatch(target, "dblclick");
+                }
+                return true;
+            }
+            """,
+            {"reportName": report_name, "doubleClick": double_click},
+        )
+    )
+
+
+def _wait_for_saved_report_dialog_closed(page, timeout: int = 8_000) -> bool:
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        if not _is_saved_report_dialog_open(page):
+            return True
+        page.wait_for_timeout(step)
+        elapsed += step
+    return False
+
+
+def _is_saved_report_dialog_open(page) -> bool:
+    try:
+        return bool(
+            page.evaluate(
+                """
+                () => {
+                    const visible = (element) => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+                    };
+                    return Array.from(document.querySelectorAll("*"))
+                        .filter(visible)
+                        .some((element) => (element.innerText || element.textContent || "").trim() === "Reportes");
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def _format_mercury_date(value: date) -> str:
+    return value.strftime("%d.%m.%Y")
+
+
+def _apply_report_date_filter(page, report_date: date) -> None:
+    if not _click_any_visible_text(page, ("Filtros", "Filters"), timeout=3_000):
+        raise MercuryAutomationError("Mercury no mostro la pestana Filtros para ajustar la Fecha Ingreso.")
+    display_date = _format_mercury_date(report_date)
+    try:
+        rows = (
+            ("1", "Desde", "11", "chkSel1"),
+            ("2", "Hasta", "12", "chkSel2"),
+        )
+        for row_number, operation_name, input_number, checkbox_name in rows:
+            field = page.locator(f"select[id$='cboCampo{row_number}']").first
+            operation = page.locator(f"select[id$='cboOperador{row_number}']").first
+            value = page.locator(f"input[id$='txtCriterio{input_number}']").first
+            checkbox = page.locator(f"input[id$='{checkbox_name}']").first
+
+            field.wait_for(state="visible", timeout=12_000)
+            operation.wait_for(state="visible", timeout=12_000)
+            value.wait_for(state="visible", timeout=12_000)
+            if not checkbox.is_checked():
+                checkbox.check()
+                page.wait_for_timeout(1_000)
+
+            if field.input_value() != "Fecha_Ingreso":
+                field.select_option("Fecha_Ingreso")
+            if operation.input_value() != operation_name:
+                operation.select_option(operation_name)
+                page.wait_for_timeout(1_000)
+            value.fill(display_date)
+        logging.info("Filtro Fecha Ingreso Mercury aplicado: %s desde/hasta.", display_date)
+        return
+    except Exception as exc:
+        raise MercuryAutomationError(f"Mercury no pudo ajustar Fecha Ingreso en Filtros: {exc}") from exc
+
+    # Fallback retained for older Mercury layouts without the known control IDs.
+    filter_frame = _wait_for_filter_controls(page, timeout=12_000) or page.main_frame
+    result = filter_frame.evaluate(
+        """
+        ({ displayDate }) => {
+            const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            };
+            const normalize = (value) => (value || "")
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/\\s+/g, " ")
+                .trim()
+                .toLocaleLowerCase();
+            const selectedText = (select) => normalize(select.options[select.selectedIndex]?.textContent || select.value);
+            const sameRow = (a, b) => Math.abs((a.top + a.height / 2) - (b.top + b.height / 2)) < 28;
+            const controls = Array.from(document.querySelectorAll("select, input, textarea"))
+                .filter(visible)
+                .map((element) => ({ element, rect: element.getBoundingClientRect() }));
+            const selectControls = controls
+                .filter((item) => item.element.tagName.toLowerCase() === "select");
+            const fieldSelects = selectControls
+                .filter((item) => Array.from(item.element.options)
+                    .some((option) => normalize(option.textContent) === "fecha ingreso"));
+            const inputs = controls
+                .filter((item) => ["input", "textarea"].includes(item.element.tagName.toLowerCase()))
+                .filter((item) => !["button", "submit", "reset", "hidden", "password", "checkbox", "radio"].includes((item.element.type || "").toLocaleLowerCase()));
+            const checkboxes = controls
+                .filter((item) => item.element.tagName.toLowerCase() === "input")
+                .filter((item) => ["checkbox", "radio"].includes((item.element.type || "").toLocaleLowerCase()));
+
+            const fillRow = (operationName, rowIndex) => {
+                const field = fieldSelects
+                    .slice()
+                    .sort((a, b) => a.rect.top - b.rect.top)[rowIndex];
+                if (!field) {
+                    return { operation: operationName, ok: false, reason: "Fecha Ingreso no encontrada" };
+                }
+                const fieldOption = Array.from(field.element.options)
+                    .find((option) => normalize(option.textContent) === "fecha ingreso");
+                if (fieldOption && selectedText(field.element) !== "fecha ingreso") {
+                    field.element.value = fieldOption.value;
+                    field.element.dispatchEvent(new Event("input", { bubbles: true }));
+                    field.element.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+                const operation = selectControls
+                    .filter((item) => sameRow(item.rect, field.rect))
+                    .filter((item) => item.rect.left > field.rect.right)
+                    .sort((a, b) => a.rect.left - b.rect.left)[0];
+                if (!operation) {
+                    return { operation: operationName, ok: false, reason: "operacion no encontrada" };
+                }
+
+                const wantedOption = Array.from(operation.element.options)
+                    .find((option) => normalize(option.textContent) === operationName);
+                if (wantedOption && selectedText(operation.element) !== operationName) {
+                    operation.element.value = wantedOption.value;
+                    operation.element.dispatchEvent(new Event("input", { bubbles: true }));
+                    operation.element.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+                const input = inputs
+                    .filter((item) => sameRow(item.rect, operation.rect))
+                    .filter((item) => item.rect.left > operation.rect.right)
+                    .sort((a, b) => a.rect.left - b.rect.left)[0];
+                if (!input) {
+                    return { operation: operationName, ok: false, reason: "campo fecha no encontrado" };
+                }
+                const checkbox = checkboxes
+                    .filter((item) => sameRow(item.rect, operation.rect))
+                    .filter((item) => item.rect.left < field.rect.left)
+                    .sort((a, b) => b.rect.left - a.rect.left)[0];
+                if (checkbox && !checkbox.element.checked) {
+                    checkbox.element.click();
+                    checkbox.element.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+                const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input.element), "value")?.set;
+                if (setter) {
+                    setter.call(input.element, displayDate);
+                } else {
+                    input.element.value = displayDate;
+                }
+                input.element.dispatchEvent(new Event("input", { bubbles: true }));
+                input.element.dispatchEvent(new Event("change", { bubbles: true }));
+                input.element.dispatchEvent(new Event("blur", { bubbles: true }));
+                return { operation: operationName, ok: true };
+            };
+            return [fillRow("desde", 0), fillRow("hasta", 1)];
+        }
+        """,
+        {"displayDate": display_date},
+    )
+    failed = [item for item in result if not item.get("ok")]
+    if failed:
+        details = "; ".join(f"{item.get('operation')}: {item.get('reason')}" for item in failed)
+        raise MercuryAutomationError(f"Mercury no pudo ajustar Fecha Ingreso en Filtros ({details}).")
+    logging.info("Filtro Fecha Ingreso Mercury aplicado: %s desde/hasta.", display_date)
+
+
+def _wait_for_filter_controls(page, timeout: int = 12_000):
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        for frame in page.frames:
+            try:
+                ready = frame.evaluate(
+                    """
+            () => {
+                const normalize = (value) => (value || "")
+                    .normalize("NFD")
+                    .replace(/[\\u0300-\\u036f]/g, "")
+                    .replace(/\\s+/g, " ")
+                    .trim()
+                    .toLocaleLowerCase();
+                const visible = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+                };
+                return Array.from(document.querySelectorAll("select"))
+                    .filter(visible)
+                    .some((select) => Array.from(select.options)
+                        .some((option) => normalize(option.textContent) === "fecha ingreso"));
+            }
+                    """
+                )
+            except Exception:
+                continue
+            if ready:
+                return frame
+        page.wait_for_timeout(step)
+        elapsed += step
+    logging.info("Mercury no mostro los controles Fecha Ingreso despues de esperar %sms.", timeout)
+    return None
 
 
 def _configured_companies(config: AppConfig) -> list[str]:
@@ -567,6 +849,22 @@ def _report_generator_url(login_url: str) -> str:
 
 def _click_text(page, text: str) -> None:
     page.get_by_text(text, exact=True).click(timeout=20_000)
+
+
+def _click_enabled_text(page, text: str, timeout: int = 20_000) -> bool:
+    elapsed = 0
+    step = 500
+    while elapsed <= timeout:
+        locator = page.get_by_text(text, exact=True).first
+        try:
+            if locator.count() and locator.is_visible(timeout=500) and locator.is_enabled(timeout=500):
+                locator.click(timeout=2_000)
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(step)
+        elapsed += step
+    return False
 
 
 def _wait_for_any_text(page, texts: tuple[str, ...], timeout: int) -> bool:

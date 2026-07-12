@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -35,8 +35,8 @@ def find_export(downloads_folder: str | Path) -> Path | None:
     return None
 
 
-def _target_path(imported_folder: Path, suffix: str) -> Path:
-    date_text = datetime.now(DR_TZ).strftime("%d.%m.%Y")
+def _target_path(imported_folder: Path, suffix: str, run_date: date | None = None) -> Path:
+    date_text = (run_date or datetime.now(DR_TZ).date()).strftime("%d.%m.%Y")
     base = imported_folder / f"nuevasEntradas_{date_text}{suffix}"
     if not base.exists():
         return base
@@ -44,11 +44,11 @@ def _target_path(imported_folder: Path, suffix: str) -> Path:
     return imported_folder / f"nuevasEntradas_{date_text}_{stamped}{suffix}"
 
 
-def import_export(source: str | Path, imported_folder: str | Path) -> ImportResult:
+def import_export(source: str | Path, imported_folder: str | Path, run_date: date | None = None) -> ImportResult:
     source_path = Path(source)
     imported_dir = Path(imported_folder)
     imported_dir.mkdir(parents=True, exist_ok=True)
-    target = _target_path(imported_dir, source_path.suffix.lower())
+    target = _target_path(imported_dir, source_path.suffix.lower(), run_date)
     temp_target = target.with_suffix(target.suffix + ".tmp")
     shutil.copy2(source_path, temp_target)
     if file_sha256(source_path) != file_sha256(temp_target):

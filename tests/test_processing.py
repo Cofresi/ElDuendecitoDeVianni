@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import copy
+from datetime import date
 from pathlib import Path
 
 from docx import Document
@@ -27,6 +28,7 @@ from el_duendecito_de_vianni.mercury import (
     _company_file_label,
     _find_installed_browser,
     _find_playwright_chromium,
+    _format_mercury_date,
     _configured_companies,
     _report_generator_url,
     run_mercury_login_test,
@@ -200,6 +202,10 @@ def test_report_generator_url_uses_mercury_host() -> None:
         _report_generator_url("http://192.168.1.3/Mercury.Menu/Management.aspx?id=abc")
         == "http://192.168.1.3/Mercury.RRHH/GeneradorReportes.aspx"
     )
+
+
+def test_mercury_date_format_for_filters() -> None:
+    assert _format_mercury_date(date(2026, 7, 6)) == "06.07.2026"
 
 
 def test_mercury_company_list_and_file_labels(tmp_path: Path) -> None:
@@ -489,6 +495,21 @@ def test_company_template_routing_uses_ines_folder(tmp_path: Path) -> None:
     assert "Ines ANA" in "\n".join(p.text for p in Document(generated).paragraphs)
     assert Path(report.output_folder).parent.name.startswith("nuevasEntradas_")
     assert Path(report.output_folder).name == "Ines"
+
+
+def test_selected_run_date_controls_output_folder(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ines_folder = Path(config.template_folder) / "Ines"
+    ines_folder.mkdir(parents=True)
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Compania": "Supermercado Ines"}],
+    )
+    make_docx(ines_folder / "01_Ines.docx", "Ines {{Nombre Empleado}}")
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx", run_date=date(2026, 7, 6))
+
+    assert Path(report.output_folder).parent.name == "nuevasEntradas_06.07.2026"
 
 
 def test_company_template_routing_uses_brothers_for_other_companies(tmp_path: Path) -> None:

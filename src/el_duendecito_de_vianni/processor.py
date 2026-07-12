@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -42,20 +42,24 @@ class DocumentProcessor:
         self.store = ProcessedStore(Path(config.imported_folder) / "processed_files.json")
         self.work_schedule_lookup = WorkScheduleLookup.from_file(config.work_schedule_lookup)
 
-    def process_next_export(self, force: bool = False, delete_original: bool = True) -> RunReport:
+    def process_next_export(
+        self, force: bool = False, delete_original: bool = True, run_date: date | None = None
+    ) -> RunReport:
         source = find_export(self.config.downloads_folder)
         if not source:
             return RunReport(message="No se encontro un archivo de exportacion en Descargas.")
-        return self.process_export_file(source, force=force, delete_original=delete_original)
+        return self.process_export_file(source, force=force, delete_original=delete_original, run_date=run_date)
 
-    def process_export_file(self, source: str | Path, force: bool = False, delete_original: bool = True) -> RunReport:
+    def process_export_file(
+        self, source: str | Path, force: bool = False, delete_original: bool = True, run_date: date | None = None
+    ) -> RunReport:
         source = Path(source)
         source_hash = file_sha256(source)
         if self.store.is_processed_hash(source_hash) and not force:
             logging.info("Archivo ya procesado: %s", source)
             return RunReport(source_spreadsheet=str(source), already_processed=True, message="Este archivo ya fue procesado.")
-        imported = import_export(source, self.config.imported_folder)
-        report = self.process_imported_file(imported.imported_path)
+        imported = import_export(source, self.config.imported_folder, run_date=run_date)
+        report = self.process_imported_file(imported.imported_path, run_date=run_date)
         report.source_spreadsheet = str(source)
         report.imported_spreadsheet = str(imported.imported_path)
         self.store.add(source, imported.imported_path, imported.file_hash)
@@ -63,10 +67,10 @@ class DocumentProcessor:
             source.unlink(missing_ok=True)
         return report
 
-    def process_imported_file(self, spreadsheet_path: str | Path) -> RunReport:
+    def process_imported_file(self, spreadsheet_path: str | Path, run_date: date | None = None) -> RunReport:
         spreadsheet = Path(spreadsheet_path)
         employees = read_employees(spreadsheet)
-        date_text = datetime.now(DR_TZ).strftime("%d.%m.%Y")
+        date_text = (run_date or datetime.now(DR_TZ).date()).strftime("%d.%m.%Y")
         final_output = Path(self.config.output_folder) / f"nuevasEntradas_{date_text}" / _run_company_folder(employees)
         temp_output = final_output.with_name(final_output.name + "_tmp")
         if temp_output.exists():

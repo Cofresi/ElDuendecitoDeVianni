@@ -3,14 +3,16 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QLockFile, QPoint, QStandardPaths, QTimer, Qt
+from PySide6.QtCore import QDate, QLockFile, QPoint, QStandardPaths, QTimer, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QSystemTrayIcon,
@@ -70,6 +73,36 @@ QLabel#StatusCard, QLabel#PathCard {
     color: #243325;
     padding: 12px;
 }
+QWidget#ActionPanel {
+    background: #fffaf0;
+    border: 1px solid #d9c99f;
+    border-radius: 8px;
+    padding: 12px;
+}
+QLabel#ActionTitle {
+    color: #245236;
+    font-size: 17px;
+    font-weight: 800;
+}
+QLabel#ActionHint {
+    color: #6a4f24;
+}
+QLabel#ProgressLabel {
+    color: #245236;
+    font-weight: 650;
+}
+QProgressBar {
+    background: #fffdf7;
+    border: 1px solid #cdbb8a;
+    border-radius: 6px;
+    color: #243325;
+    min-height: 18px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background: #5b8c48;
+    border-radius: 5px;
+}
 QTextEdit {
     background: #fffdf7;
     border: 1px solid #cdbb8a;
@@ -93,14 +126,14 @@ QPushButton:hover {
 QPushButton:pressed {
     background: #24482d;
 }
-QLineEdit, QSpinBox, QComboBox {
+QLineEdit, QSpinBox, QComboBox, QDateEdit {
     background: #fffdf7;
     border: 1px solid #cdbb8a;
     border-radius: 6px;
     color: #1f2b20;
     padding: 6px;
 }
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid #4f7c43;
     background: #ffffff;
 }
@@ -189,6 +222,62 @@ def make_icon() -> QIcon:
     painter.drawEllipse(18, 23, 28, 30)
     painter.end()
     return QIcon(pixmap)
+
+
+def make_dancing_elf_frame(frame: int) -> QPixmap:
+    pixmap = QPixmap(42, 42)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    step = -2 if frame % 2 == 0 else 2
+    arm_lift = -5 if frame % 2 == 0 else 3
+    foot_lift = 4 if frame % 2 == 0 else -1
+
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#d8a15f"))
+    left_ear = QPainterPath()
+    left_ear.moveTo(13, 17)
+    left_ear.lineTo(4, 13)
+    left_ear.lineTo(12, 23)
+    left_ear.closeSubpath()
+    painter.drawPath(left_ear)
+    right_ear = QPainterPath()
+    right_ear.moveTo(29, 17)
+    right_ear.lineTo(38, 13)
+    right_ear.lineTo(30, 23)
+    right_ear.closeSubpath()
+    painter.drawPath(right_ear)
+
+    painter.setBrush(QColor("#f0d7a3"))
+    painter.drawEllipse(12 + step, 11, 18, 20)
+
+    hat = QPainterPath()
+    hat.moveTo(10 + step, 15)
+    hat.cubicTo(13 + step, 4, 26 + step, 2, 33 + step, 8)
+    hat.cubicTo(27 + step, 9, 27 + step, 14, 33 + step, 17)
+    hat.cubicTo(25 + step, 14, 17 + step, 13, 10 + step, 15)
+    painter.setBrush(QColor("#2f6f3e"))
+    painter.drawPath(hat)
+    painter.setBrush(QColor("#d6a540"))
+    painter.drawEllipse(31 + step, 5, 5, 5)
+
+    painter.setPen(QPen(QColor("#5b4028"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    painter.drawPoint(QPoint(18 + step, 20))
+    painter.drawPoint(QPoint(24 + step, 20))
+    painter.setPen(QPen(QColor("#7b4e2f"), 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    painter.drawArc(18 + step, 21, 7, 5, 200 * 16, 140 * 16)
+
+    painter.setPen(QPen(QColor("#315f3b"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    painter.drawLine(21 + step, 30, 21 - step, 37)
+    painter.setPen(QPen(QColor("#d6a540"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    painter.drawLine(14 + step, 29, 8, 25 + arm_lift)
+    painter.drawLine(28 + step, 29, 35, 25 - arm_lift)
+    painter.setPen(QPen(QColor("#24482d"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    painter.drawLine(18 + step, 36, 12, 39 + foot_lift)
+    painter.drawLine(24 + step, 36, 31, 39 - foot_lift)
+    painter.end()
+    return pixmap
 
 
 class ConfigDialog(QDialog):
@@ -334,6 +423,7 @@ class MainWindow(QMainWindow):
         self.last_scan = "Nunca"
         self.last_spreadsheet = ""
         self.last_employees = 0
+        self.dance_frame = 0
         self.monitoring = config.monitoring_enabled
         self.exiting = False
         self.setWindowTitle("El duendecito de Vianni")
@@ -342,6 +432,8 @@ class MainWindow(QMainWindow):
         self._build_tray()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.scan_now)
+        self.dance_timer = QTimer(self)
+        self.dance_timer.timeout.connect(self._advance_dancing_elf)
         self._sync_timer()
         self.refresh_status()
         QTimer.singleShot(1200, self.show_startup_greeting)
@@ -352,10 +444,41 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
         title = QLabel("El duendecito de Vianni")
         title.setObjectName("TitleLabel")
-        subtitle = QLabel("Un ayudante discreto para preparar documentos de nuevas entradas")
+        subtitle = QLabel("Un ayudante discreto para preparar documentos de entradas y salidas")
         subtitle.setObjectName("SubtitleLabel")
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        actions = QHBoxLayout()
+        actions.setSpacing(12)
+        actions.addWidget(self._workflow_panel("Entradas", "Procesar nuevas entradas de un solo dia.", self.run_entradas))
+        actions.addWidget(self._workflow_panel("Salidas", "Preparar salidas de un solo dia.", self.run_salidas))
+        layout.addLayout(actions)
+        progress_row = QHBoxLayout()
+        progress_row.setSpacing(8)
+        self.busy_elf = QLabel()
+        self.busy_elf.setFixedSize(42, 42)
+        self.busy_elf.setPixmap(make_dancing_elf_frame(0))
+        self.busy_elf.setVisible(False)
+        self.progress_label = QLabel("Listo para trabajar.")
+        self.progress_label.setObjectName("ProgressLabel")
+        self.progress_label.setWordWrap(True)
+        progress_row.addWidget(self.busy_elf)
+        progress_row.addWidget(self.progress_label, 1)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        layout.addLayout(progress_row)
+        layout.addWidget(self.progress_bar)
+
+        self.advanced_toggle = QPushButton("Mostrar opciones avanzadas")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.clicked.connect(self._toggle_advanced_options)
+        layout.addWidget(self.advanced_toggle)
+
+        self.advanced_widget = QWidget()
+        advanced_layout = QVBoxLayout(self.advanced_widget)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(12)
         self.status = QLabel()
         self.status.setObjectName("StatusCard")
         self.paths = QLabel()
@@ -363,13 +486,12 @@ class MainWindow(QMainWindow):
         self.paths.setWordWrap(True)
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
-        layout.addWidget(self.status)
-        layout.addWidget(self.paths)
-        layout.addWidget(self.log_area)
+        advanced_layout.addWidget(self.status)
+        advanced_layout.addWidget(self.paths)
+        advanced_layout.addWidget(self.log_area)
         buttons = QHBoxLayout()
         for text, callback in (
-            ("Procesar ahora", self.scan_now),
-            ("Mercury", self.run_mercury),
+            ("Procesar archivo", self.scan_now),
             ("Plantillas", lambda: open_folder(self.config.template_folder)),
             ("Salida", lambda: open_folder(self.config.output_folder)),
             ("Configuracion", self.open_config),
@@ -380,9 +502,41 @@ class MainWindow(QMainWindow):
             button = QPushButton(text)
             button.clicked.connect(callback)
             buttons.addWidget(button)
-        layout.addLayout(buttons)
+        advanced_layout.addLayout(buttons)
+        self.advanced_widget.setVisible(False)
+        layout.addWidget(self.advanced_widget)
         self.setCentralWidget(central)
         self.resize(920, 560)
+
+    def _workflow_panel(self, title: str, hint: str, callback) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("ActionPanel")
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(8)
+        title_label = QLabel(title)
+        title_label.setObjectName("ActionTitle")
+        hint_label = QLabel(hint)
+        hint_label.setObjectName("ActionHint")
+        hint_label.setWordWrap(True)
+        date_edit = QDateEdit(QDate.currentDate())
+        date_edit.setCalendarPopup(True)
+        date_edit.setDisplayFormat("dd/MM/yyyy")
+        button = QPushButton(title)
+        button.clicked.connect(callback)
+        layout.addWidget(title_label)
+        layout.addWidget(hint_label)
+        layout.addWidget(date_edit)
+        layout.addWidget(button)
+        if title == "Entradas":
+            self.entries_date = date_edit
+        else:
+            self.departures_date = date_edit
+        return panel
+
+    def _toggle_advanced_options(self) -> None:
+        visible = self.advanced_toggle.isChecked()
+        self.advanced_widget.setVisible(visible)
+        self.advanced_toggle.setText("Ocultar opciones avanzadas" if visible else "Mostrar opciones avanzadas")
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(make_icon(), self)
@@ -390,8 +544,8 @@ class MainWindow(QMainWindow):
         menu = QMenu()
         actions = [
             ("Abrir El duendecito de Vianni", self.show_window),
-            ("Procesar ahora", self.scan_now),
-            ("Mercury", self.run_mercury),
+            ("Entradas", self.run_entradas),
+            ("Procesar archivo de Descargas", self.scan_now),
             ("Iniciar monitoreo", self.start_monitoring),
             ("Detener monitoreo", self.stop_monitoring),
             ("Abrir carpeta de salida", lambda: open_folder(self.config.output_folder)),
@@ -444,19 +598,65 @@ class MainWindow(QMainWindow):
         self.log_area.append(text)
         logging.info(text)
 
+    def set_progress(self, value: int, message: str) -> None:
+        self.stop_busy_elf()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(max(0, min(100, value)))
+        self.progress_label.setText(message)
+        QApplication.processEvents()
+
+    def start_busy_progress(self, message: str) -> None:
+        self.start_busy_elf()
+        self.progress_bar.setRange(0, 0)
+        self.progress_label.setText(message)
+        QApplication.processEvents()
+
+    def start_busy_elf(self) -> None:
+        self.busy_elf.setVisible(True)
+        if not self.dance_timer.isActive():
+            self.dance_timer.start(260)
+
+    def stop_busy_elf(self) -> None:
+        self.dance_timer.stop()
+        self.busy_elf.setVisible(False)
+
+    def _advance_dancing_elf(self) -> None:
+        self.dance_frame = (self.dance_frame + 1) % 2
+        self.busy_elf.setPixmap(make_dancing_elf_frame(self.dance_frame))
+
     def scan_now(self) -> None:
         from datetime import datetime
 
         self.last_scan = datetime.now().strftime("%d/%m/%Y %H:%M")
         self.append_log("El duendecito esta revisando Descargas...")
+        self.set_progress(10, "Revisando archivo en Descargas...")
         try:
             report = self.processor.process_next_export(delete_original=not self.config.ask_before_delete_original)
         except Exception as exc:
             logging.exception("Error al procesar")
+            self.set_progress(0, "No se pudo procesar el archivo.")
             QMessageBox.critical(self, "El duendecito necesita ayuda", f"No se pudo procesar el archivo.\n\n{exc}")
             self.refresh_status()
             return
+        self.set_progress(100, "Documentos generados.")
         self.handle_report(report)
+
+    def run_entradas(self) -> None:
+        self.run_mercury(self._selected_entries_date())
+
+    def run_salidas(self) -> None:
+        selected = self._selected_departures_date().strftime("%d/%m/%Y")
+        QMessageBox.information(
+            self,
+            "Salidas",
+            f"La funcion de salidas para {selected} sera el proximo flujo que vamos a construir.",
+        )
+
+    def _selected_entries_date(self) -> date:
+        return self.entries_date.date().toPython()
+
+    def _selected_departures_date(self) -> date:
+        return self.departures_date.date().toPython()
 
     def handle_report(self, report: RunReport) -> None:
         self.last_spreadsheet = report.imported_spreadsheet or report.source_spreadsheet
@@ -521,30 +721,40 @@ class MainWindow(QMainWindow):
         if os.name == "nt":
             os.startfile(self.log_path)  # type: ignore[attr-defined]
 
-    def run_mercury(self) -> None:
-        self.append_log("El duendecito esta buscando el reporte en Mercury...")
+    def run_mercury(self, report_date: date | None = None) -> None:
+        report_date = report_date or date.today()
+        self.append_log(f"El duendecito esta buscando entradas de {report_date:%d/%m/%Y} en Mercury...")
+        self.start_busy_progress("Entrando a Mercury y preparando la descarga...")
         try:
-            result = run_mercury_export(self.config, load_mercury_password())
+            result = run_mercury_export(self.config, load_mercury_password(), report_date=report_date)
+            self.set_progress(45, "Reporte descargado. Revisando datos...")
             self.append_log(result.message)
             processed_reports: list[RunReport] = []
             empty_files: list[str] = []
-            for downloaded_file in result.downloaded_files:
+            total_files = max(1, len(result.downloaded_files))
+            for index, downloaded_file in enumerate(result.downloaded_files, start=1):
+                progress = 45 + int((index - 1) / total_files * 45)
+                self.set_progress(progress, f"Procesando documentos {index} de {total_files}...")
                 if has_employee_rows(downloaded_file):
                     processed_reports.append(
                         self.processor.process_export_file(
                             downloaded_file,
                             force=True,
                             delete_original=not self.config.ask_before_delete_original,
+                            run_date=report_date,
                         )
                     )
                 else:
                     empty_files.append(Path(downloaded_file).name)
+                self.set_progress(45 + int(index / total_files * 45), f"Documentos procesados {index} de {total_files}.")
         except MercuryAutomationError as exc:
+            self.set_progress(0, "Mercury necesita configuracion.")
             QMessageBox.warning(self, "Mercury necesita configuracion", str(exc))
             self.append_log(str(exc))
             return
         except Exception as exc:
             logging.exception("Error al usar Mercury")
+            self.set_progress(0, "No se pudo completar el trabajo en Mercury.")
             QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
             return
         for company in result.companies_without_download:
@@ -552,11 +762,14 @@ class MainWindow(QMainWindow):
         for filename in empty_files:
             self.append_log(f"{filename} no tiene nuevas entradas.")
         if not processed_reports:
+            self.set_progress(100, "No hay nuevas entradas para procesar.")
             QMessageBox.information(self, "Mercury", "No hay nuevas entradas para procesar.")
             self.refresh_status()
             return
+        self.set_progress(100, "Documentos generados.")
         for report in processed_reports:
             self.handle_report(report)
+        self.set_progress(100, "Trabajo terminado.")
 
     def start_monitoring(self) -> None:
         self.monitoring = True
