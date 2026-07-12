@@ -5,6 +5,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import Mapping
 from zoneinfo import ZoneInfo
 
 from .config import AppConfig
@@ -51,7 +52,12 @@ class DocumentProcessor:
         return self.process_export_file(source, force=force, delete_original=delete_original, run_date=run_date)
 
     def process_export_file(
-        self, source: str | Path, force: bool = False, delete_original: bool = True, run_date: date | None = None
+        self,
+        source: str | Path,
+        force: bool = False,
+        delete_original: bool = True,
+        run_date: date | None = None,
+        photo_paths: Mapping[str, str] | None = None,
     ) -> RunReport:
         source = Path(source)
         source_hash = file_sha256(source)
@@ -59,7 +65,7 @@ class DocumentProcessor:
             logging.info("Archivo ya procesado: %s", source)
             return RunReport(source_spreadsheet=str(source), already_processed=True, message="Este archivo ya fue procesado.")
         imported = import_export(source, self.config.imported_folder, run_date=run_date)
-        report = self.process_imported_file(imported.imported_path, run_date=run_date)
+        report = self.process_imported_file(imported.imported_path, run_date=run_date, photo_paths=photo_paths)
         report.source_spreadsheet = str(source)
         report.imported_spreadsheet = str(imported.imported_path)
         self.store.add(source, imported.imported_path, imported.file_hash)
@@ -67,7 +73,12 @@ class DocumentProcessor:
             source.unlink(missing_ok=True)
         return report
 
-    def process_imported_file(self, spreadsheet_path: str | Path, run_date: date | None = None) -> RunReport:
+    def process_imported_file(
+        self,
+        spreadsheet_path: str | Path,
+        run_date: date | None = None,
+        photo_paths: Mapping[str, str] | None = None,
+    ) -> RunReport:
         spreadsheet = Path(spreadsheet_path)
         employees = read_employees(spreadsheet)
         date_text = (run_date or datetime.now(DR_TZ).date()).strftime("%d.%m.%Y")
@@ -81,6 +92,8 @@ class DocumentProcessor:
         try:
             for employee in employees:
                 add_work_schedule_sentence(employee, self.work_schedule_lookup)
+                employee_values = dict(employee)
+                employee_values["Foto"] = (photo_paths or {}).get(employee.get("Numero", ""), "")
                 employee_dir = temp_output / employee_folder_name(employee)
                 employee_dir.mkdir(parents=True, exist_ok=True)
                 template_folder = template_folder_for_employee(self.config.template_folder, employee)
@@ -92,7 +105,12 @@ class DocumentProcessor:
                 )
                 for template in templates:
                     destination = employee_dir / safe_filename(template.name)
-                    result = process_template_copy(template, destination, employee)
+                    result = process_template_copy(
+                        template,
+                        destination,
+                        employee_values,
+                        photo_path=employee_values["Foto"] or None,
+                    )
                     report.generated_documents.extend(str(p) for p in result.generated_files)
                     report.missing_placeholders.update(result.missing_placeholders)
                     report.skipped_files.extend(result.skipped_files)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64decode
 from copy import copy
 from datetime import date
 from pathlib import Path
@@ -13,7 +14,7 @@ from el_duendecito_de_vianni.processed_store import ProcessedStore, file_sha256
 from el_duendecito_de_vianni.processor import DocumentProcessor
 from el_duendecito_de_vianni.spreadsheet import read_employees
 from el_duendecito_de_vianni.spreadsheet import has_employee_rows
-from el_duendecito_de_vianni.templates import process_docx, replace_placeholders
+from el_duendecito_de_vianni.templates import process_docx, process_xlsx, replace_placeholders
 from el_duendecito_de_vianni.utils import company_template_subfolder, employee_folder_name, sorted_templates
 from el_duendecito_de_vianni.work_schedule import (
     DERIVED_FIELD,
@@ -29,6 +30,7 @@ from el_duendecito_de_vianni.mercury import (
     _find_installed_browser,
     _find_playwright_chromium,
     _format_mercury_date,
+    _employee_page_url,
     _configured_companies,
     _report_generator_url,
     run_mercury_login_test,
@@ -223,6 +225,36 @@ def test_report_generator_url_uses_mercury_host() -> None:
 
 def test_mercury_date_format_for_filters() -> None:
     assert _format_mercury_date(date(2026, 7, 6)) == "06.07.2026"
+
+
+def test_mercury_employee_page_url() -> None:
+    assert (
+        _employee_page_url("http://192.168.1.3/Mercury.Menu/Management.aspx", "135")
+        == "http://192.168.1.3/Mercury.RRHH/Empleados.aspx?Codigo=135"
+    )
+
+
+def test_photo_placeholder_embeds_image_in_excel(tmp_path: Path) -> None:
+    workbook = Workbook()
+    workbook.active["B3"] = "{{Foto}}"
+    workbook.active.merge_cells("B3:C5")
+    workbook_path = tmp_path / "photo-template.xlsx"
+    workbook.save(workbook_path)
+
+    photo_path = tmp_path / "photo.png"
+    photo_path.write_bytes(
+        b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+    )
+    missing: set[str] = set()
+
+    process_xlsx(workbook_path, {}, missing, photo_path=photo_path)
+
+    processed = load_workbook(workbook_path)
+    assert processed.active["B3"].value in {None, ""}
+    assert len(processed.active._images) == 1
+    assert processed.active._images[0].anchor.ext.width > 1_000_000
+    assert processed.active._images[0].anchor.ext.height > 500_000
+    assert not missing
 
 
 def test_mercury_company_list_and_file_labels(tmp_path: Path) -> None:

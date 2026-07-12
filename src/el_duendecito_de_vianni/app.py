@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 import time
 from datetime import date, datetime
@@ -784,6 +785,7 @@ class MainWindow(QMainWindow):
                             force=True,
                             delete_original=True,
                             run_date=report_date,
+                            photo_paths=result.photo_files.get(downloaded_file, {}),
                         )
                     )
                 else:
@@ -796,6 +798,9 @@ class MainWindow(QMainWindow):
             self.set_progress(0, "No se pudo completar el trabajo en Mercury.")
             QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
             return
+        finally:
+            if result.photo_temp_dir:
+                shutil.rmtree(result.photo_temp_dir, ignore_errors=True)
         self.mercury_busy = False
         for company in result.companies_without_download:
             self.append_log(f"Mercury no genero archivo para {company}.")

@@ -3,14 +3,17 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
+import tempfile
 import time
 from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from .config import AppConfig
 from .importer import EXPORT_NAMES
+from .spreadsheet import read_employees
 
 
 @dataclass
@@ -20,6 +23,8 @@ class MercuryRunResult:
     downloaded_file: str = ""
     downloaded_files: list[str] = field(default_factory=list)
     companies_without_download: list[str] = field(default_factory=list)
+    photo_files: dict[str, dict[str, str]] = field(default_factory=dict)
+    photo_temp_dir: str = ""
 
 
 class MercuryAutomationError(RuntimeError):
@@ -65,6 +70,8 @@ def run_mercury_export(
                     context.close()
             downloaded_files: list[str] = []
             empty_companies: list[str] = []
+            photo_files: dict[str, dict[str, str]] = {}
+            photo_temp_dir = ""
             for company in _configured_companies(config):
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()
@@ -73,6 +80,11 @@ def run_mercury_export(
                     downloaded = _download_existing_report(page, config, company, report_date=report_date)
                     if downloaded:
                         downloaded_files.append(str(downloaded))
+                        if not photo_temp_dir:
+                            photo_temp_dir = tempfile.mkdtemp(prefix="duendecito-fotos-", dir=downloads)
+                        photo_files[str(downloaded)] = _download_employee_photos(
+                            page, config, downloaded, company, Path(photo_temp_dir)
+                        )
                         logging.info("Reporte de Mercury descargado para %s: %s", company, downloaded)
                     else:
                         empty_companies.append(company)
@@ -92,11 +104,59 @@ def run_mercury_export(
                 downloaded_file=downloaded_files[0],
                 downloaded_files=downloaded_files,
                 companies_without_download=empty_companies,
+                photo_files=photo_files,
+                photo_temp_dir=photo_temp_dir,
             )
         except PlaywrightTimeoutError as exc:
             raise MercuryAutomationError(f"Mercury tardo demasiado en responder: {exc}") from exc
+        except Exception:
+            if "photo_temp_dir" in locals() and photo_temp_dir:
+                shutil.rmtree(photo_temp_dir, ignore_errors=True)
+            raise
         finally:
             browser.close()
+
+
+def _download_employee_photos(page, config: AppConfig, spreadsheet: Path, company_name: str, photo_dir: Path) -> dict[str, str]:
+    photos: dict[str, str] = {}
+    try:
+        employees = read_employees(spreadsheet)
+    except Exception as exc:
+        logging.warning("No se pudieron leer los empleados para buscar fotos: %s", exc)
+        return photos
+
+    for employee in employees:
+        number = str(employee.get("Numero", "")).strip()
+        if not number:
+            continue
+        try:
+            page.goto(_employee_page_url(config.mercury_url, number), wait_until="domcontentloaded", timeout=30_000)
+            image = page.locator("img[id$='Image1']").first
+            image.wait_for(state="attached", timeout=5_000)
+            image_info = image.evaluate(
+                "element => ({src: element.getAttribute('src') || '', width: element.naturalWidth || 0, height: element.naturalHeight || 0})"
+            )
+            if (
+                not image_info["src"]
+                or image_info["width"] < 40
+                or image_info["height"] < 40
+            ):
+                logging.info("Mercury no tiene foto para el empleado %s (%s).", number, company_name)
+                continue
+            target = photo_dir / f"{_company_file_label(company_name)}_{number}.png"
+            image.screenshot(path=str(target), timeout=10_000)
+            photos[number] = str(target)
+            logging.info("Foto descargada para el empleado %s (%s).", number, company_name)
+        except Exception as exc:
+            logging.warning("No se pudo obtener la foto del empleado %s (%s): %s", number, company_name, exc)
+    return photos
+
+
+def _employee_page_url(base_url: str, employee_number: str) -> str:
+    parsed = urlparse(base_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise MercuryAutomationError("La direccion de Mercury no parece ser una URL valida.")
+    return f"{parsed.scheme}://{parsed.netloc}/Mercury.RRHH/Empleados.aspx?Codigo={quote(employee_number, safe='')}"
 
 
 def _open_authenticated_session(page, config: AppConfig, password: str) -> None:

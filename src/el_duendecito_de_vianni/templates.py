@@ -10,6 +10,8 @@ from pathlib import Path
 
 from docx import Document
 from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as ExcelImage
+from openpyxl.utils.cell import range_boundaries
 
 PLACEHOLDER_RE = re.compile(r"\{\{([^{}]+)\}\}")
 STATIC_TEMPLATE_MARKER = "__static__"
@@ -175,13 +177,27 @@ def process_docx(path: Path, values: dict[str, str], missing: set[str]) -> None:
     document.save(path)
 
 
-def process_xlsx(path: Path, values: dict[str, str], missing: set[str]) -> None:
+def process_xlsx(
+    path: Path,
+    values: dict[str, str],
+    missing: set[str],
+    photo_path: str | Path | None = None,
+) -> None:
     workbook = load_workbook(path)
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and "{{" in cell.value:
+                    has_photo_placeholder = any(
+                        _parse_placeholder(match.group(1))[0].casefold() == "foto"
+                        for match in PLACEHOLDER_RE.finditer(cell.value)
+                    )
                     cell.value = replace_placeholders(cell.value, values, missing)
+                    if has_photo_placeholder and photo_path:
+                        image = ExcelImage(str(photo_path))
+                        image.width, image.height = _photo_dimensions(sheet, cell.coordinate)
+                        image.anchor = cell.coordinate
+                        sheet.add_image(image)
         for attr in ("oddHeader", "evenHeader", "firstHeader", "oddFooter", "evenFooter", "firstFooter"):
             header_footer = getattr(sheet, attr, None)
             if header_footer:
@@ -192,7 +208,39 @@ def process_xlsx(path: Path, values: dict[str, str], missing: set[str]) -> None:
     workbook.save(path)
 
 
-def process_template_copy(template: Path, destination: Path, values: dict[str, str]) -> TemplateResult:
+def _photo_dimensions(sheet, coordinate: str) -> tuple[int, int]:
+    """Fit a photo to the merged area containing the Foto placeholder."""
+    target = None
+    for merged_range in sheet.merged_cells.ranges:
+        if coordinate in merged_range:
+            target = merged_range
+            break
+    if target is None:
+        min_col = max_col = sheet[coordinate].column
+        min_row = max_row = sheet[coordinate].row
+    else:
+        min_col, min_row, max_col, max_row = range_boundaries(str(target))
+
+    width = 0.0
+    for column in range(min_col, max_col + 1):
+        letter = sheet.cell(row=1, column=column).column_letter
+        width += float(sheet.column_dimensions[letter].width or 13.0) * 7 + 5
+
+    height_points = 0.0
+    for row in range(min_row, max_row + 1):
+        height_points += float(sheet.row_dimensions[row].height or 15.0)
+
+    width_pixels = max(1, int(width - 6))
+    height_pixels = max(1, int(height_points * 96 / 72 - 6))
+    return width_pixels, height_pixels
+
+
+def process_template_copy(
+    template: Path,
+    destination: Path,
+    values: dict[str, str],
+    photo_path: str | Path | None = None,
+) -> TemplateResult:
     result = TemplateResult()
     missing: set[str] = set()
     suffix = template.suffix.lower()
@@ -212,7 +260,7 @@ def process_template_copy(template: Path, destination: Path, values: dict[str, s
         if suffix == ".docx":
             process_docx(destination, values, missing)
         elif suffix == ".xlsx":
-            process_xlsx(destination, values, missing)
+            process_xlsx(destination, values, missing, photo_path=photo_path)
         else:
             result.skipped_files.append(template.name)
     except Exception:
