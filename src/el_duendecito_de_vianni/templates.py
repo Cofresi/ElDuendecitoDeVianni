@@ -12,6 +12,7 @@ from docx import Document
 from openpyxl import load_workbook
 
 PLACEHOLDER_RE = re.compile(r"\{\{([^{}]+)\}\}")
+STATIC_TEMPLATE_MARKER = "__static__"
 
 
 @dataclass
@@ -201,6 +202,10 @@ def process_template_copy(template: Path, destination: Path, values: dict[str, s
         )
         return result
     shutil.copy2(template, destination)
+    if STATIC_TEMPLATE_MARKER in template.stem.casefold():
+        logging.info("Plantilla estatica copiada sin reemplazo: %s", template)
+        result.generated_files.append(destination)
+        return result
     try:
         if suffix == ".docx":
             process_docx(destination, values, missing)

@@ -113,6 +113,23 @@ def test_multiple_employees_and_multiple_templates(tmp_path: Path) -> None:
     assert report.document_count == 4
 
 
+def test_static_template_is_copied_without_placeholder_processing(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    Path(config.template_folder).mkdir(parents=True)
+    make_employee_sheet(tmp_path / "employees.xlsx", [{"Numero": 1, "Nombre Empleado": "ANA"}])
+    make_docx(
+        Path(config.template_folder) / "03__STATIC__Reglamento.docx",
+        "Texto fijo {{Nombre Empleado}}",
+    )
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    assert report.document_count == 1
+    generated = Path(report.generated_documents[0])
+    assert "Texto fijo {{Nombre Empleado}}" in "\n".join(p.text for p in Document(generated).paragraphs)
+    assert not report.skipped_files
+
+
 def test_placeholders_with_accents_and_spaces(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     Path(config.template_folder).mkdir(parents=True)

@@ -86,6 +86,8 @@ Dentro de cada carpeta, las plantillas se procesan en orden alfabetico, por eso 
 - `02_Formulario.xlsx`
 - `10_Declaracion.docx`
 
+Las plantillas que solo deben copiarse e imprimirse, sin reemplazar marcadores, pueden incluir `__STATIC__` en el nombre. Por ejemplo: `03__STATIC__Reglamento.docx`.
+
 Los marcadores usan este formato:
 
 ```text
