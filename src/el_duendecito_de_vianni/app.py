@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QLockFile, QPoint, QStandardPaths, QTimer, Qt
+from PySide6.QtCore import QDate, QLockFile, QPoint, QStandardPaths, QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -175,6 +176,26 @@ QMenu::item:selected {
     background: #dfeecf;
 }
 """
+
+
+class MercuryWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(object)
+
+    def __init__(self, config: AppConfig, password: str, report_date: date):
+        super().__init__()
+        self.config = config
+        self.password = password
+        self.report_date = report_date
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = run_mercury_export(self.config, self.password, report_date=self.report_date)
+        except Exception as exc:
+            self.failed.emit(exc)
+        else:
+            self.finished.emit(result)
 
 
 def make_icon() -> QIcon:
@@ -426,6 +447,22 @@ class MainWindow(QMainWindow):
         self.dance_frame = 0
         self.monitoring = config.monitoring_enabled
         self.exiting = False
+        self.mercury_thread: QThread | None = None
+        self.mercury_worker: MercuryWorker | None = None
+        self.mercury_busy = False
+        self.busy_status_timer = QTimer(self)
+        self.busy_status_timer.timeout.connect(self._advance_busy_status)
+        self.busy_started_at = 0.0
+        self.busy_status_index = 0
+        self.busy_status_phases = (
+            "Conectando con Mercury",
+            "Seleccionando la compania",
+            "Abriendo Recursos Humanos",
+            "Preparando el reporte",
+            "Aplicando el filtro de fecha",
+            "Esperando la respuesta de Mercury",
+            "Descargando el reporte",
+        )
         self.setWindowTitle("El duendecito de Vianni")
         self.setWindowIcon(make_icon())
         self._build_ui()
@@ -599,6 +636,7 @@ class MainWindow(QMainWindow):
         logging.info(text)
 
     def set_progress(self, value: int, message: str) -> None:
+        self.busy_status_timer.stop()
         self.stop_busy_elf()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(max(0, min(100, value)))
@@ -608,8 +646,20 @@ class MainWindow(QMainWindow):
     def start_busy_progress(self, message: str) -> None:
         self.start_busy_elf()
         self.progress_bar.setRange(0, 0)
+        self.busy_started_at = time.monotonic()
+        self.busy_status_index = 0
         self.progress_label.setText(message)
+        self.busy_status_timer.start(1200)
         QApplication.processEvents()
+
+    def _advance_busy_status(self) -> None:
+        if not self.busy_status_timer.isActive():
+            return
+        self.busy_status_index = (self.busy_status_index + 1) % len(self.busy_status_phases)
+        elapsed = int(time.monotonic() - self.busy_started_at)
+        minutes, seconds = divmod(elapsed, 60)
+        phase = self.busy_status_phases[self.busy_status_index]
+        self.progress_label.setText(f"{phase}...  {minutes:02d}:{seconds:02d}")
 
     def start_busy_elf(self) -> None:
         self.busy_elf.setVisible(True)
@@ -723,10 +773,46 @@ class MainWindow(QMainWindow):
 
     def run_mercury(self, report_date: date | None = None) -> None:
         report_date = report_date or date.today()
+        if self.mercury_busy:
+            self.append_log("El duendecito ya esta trabajando con Mercury.")
+            return
         self.append_log(f"El duendecito esta buscando entradas de {report_date:%d/%m/%Y} en Mercury...")
         self.start_busy_progress("Entrando a Mercury y preparando la descarga...")
+        self.mercury_busy = True
+        self.mercury_report_date = report_date
+        self.mercury_thread = QThread(self)
+        self.mercury_worker = MercuryWorker(self.config, load_mercury_password(), report_date)
+        self.mercury_worker.moveToThread(self.mercury_thread)
+        self.mercury_thread.started.connect(self.mercury_worker.run)
+        self.mercury_worker.finished.connect(self._handle_mercury_result)
+        self.mercury_worker.failed.connect(self._handle_mercury_error)
+        self.mercury_worker.finished.connect(self.mercury_thread.quit)
+        self.mercury_worker.failed.connect(self.mercury_thread.quit)
+        self.mercury_worker.finished.connect(self.mercury_worker.deleteLater)
+        self.mercury_worker.failed.connect(self.mercury_worker.deleteLater)
+        self.mercury_thread.finished.connect(self.mercury_thread.deleteLater)
+        self.mercury_thread.finished.connect(self._clear_mercury_worker)
+        self.mercury_thread.start()
+
+    def _clear_mercury_worker(self) -> None:
+        self.mercury_worker = None
+        self.mercury_thread = None
+
+    def _handle_mercury_error(self, exc: Exception) -> None:
+        self.mercury_busy = False
+        if isinstance(exc, MercuryAutomationError):
+            self.set_progress(0, "Mercury necesita configuracion.")
+            QMessageBox.warning(self, "Mercury necesita configuracion", str(exc))
+            self.append_log(str(exc))
+        else:
+            logging.exception("Error al usar Mercury")
+            self.set_progress(0, "No se pudo completar el trabajo en Mercury.")
+            QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
+        self.refresh_status()
+
+    def _handle_mercury_result(self, result) -> None:
+        report_date = self.mercury_report_date
         try:
-            result = run_mercury_export(self.config, load_mercury_password(), report_date=report_date)
             self.set_progress(45, "Reporte descargado. Revisando datos...")
             self.append_log(result.message)
             processed_reports: list[RunReport] = []
@@ -747,16 +833,13 @@ class MainWindow(QMainWindow):
                 else:
                     empty_files.append(Path(downloaded_file).name)
                 self.set_progress(45 + int(index / total_files * 45), f"Documentos procesados {index} de {total_files}.")
-        except MercuryAutomationError as exc:
-            self.set_progress(0, "Mercury necesita configuracion.")
-            QMessageBox.warning(self, "Mercury necesita configuracion", str(exc))
-            self.append_log(str(exc))
-            return
         except Exception as exc:
+            self.mercury_busy = False
             logging.exception("Error al usar Mercury")
             self.set_progress(0, "No se pudo completar el trabajo en Mercury.")
             QMessageBox.critical(self, "Mercury necesita ayuda", f"No se pudo completar el trabajo en Mercury.\n\n{exc}")
             return
+        self.mercury_busy = False
         for company in result.companies_without_download:
             self.append_log(f"Mercury no genero archivo para {company}.")
         for filename in empty_files:
