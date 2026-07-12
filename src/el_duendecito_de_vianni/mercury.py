@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -145,16 +146,28 @@ def _download_existing_report(
     _open_saved_report(page, config.mercury_report_name)
     if report_date:
         _apply_report_date_filter(page, report_date)
+    result_panel = page.locator("#ctl00_MainContent_tabGeneral_ctl05").first
+    result_panel_before = result_panel.inner_html() if result_panel.count() else ""
     process_button = page.locator("#ctl00_MainContent_lnkProcesar").first
     if process_button.count():
         process_button.wait_for(state="visible", timeout=8_000)
         if not process_button.is_enabled():
             raise MercuryAutomationError("Mercury no habilito Ver reporte despues de aplicar los filtros.")
-        process_button.click(timeout=8_000)
+        click_started = time.monotonic()
+        logging.info("Mercury: haciendo click en Ver reporte.")
+        process_button.click(timeout=8_000, no_wait_after=True)
+        logging.info("Mercury: click en Ver reporte termino en %.2fs.", time.monotonic() - click_started)
     else:
         _click_text(page, "Ver reporte")
-    page.wait_for_load_state("domcontentloaded", timeout=15_000)
-    if _wait_for_report_result(page, timeout=10_000):
+    result_started = time.monotonic()
+    result_is_empty = _wait_for_report_result(
+        page,
+        timeout=10_000,
+        result_panel=result_panel,
+        result_panel_before=result_panel_before,
+    )
+    logging.info("Mercury: resultado del reporte detectado en %.2fs (sin registros: %s).", time.monotonic() - result_started, result_is_empty)
+    if result_is_empty:
         logging.info("Mercury no encontro registros para %s.", company_name)
         return None
 
@@ -549,27 +562,50 @@ def _wait_for_no_records(page, timeout: int = 5_000) -> bool:
     return False
 
 
-def _wait_for_report_result(page, timeout: int = 10_000) -> bool:
+def _wait_for_report_result(
+    page, timeout: int = 10_000, result_panel=None, result_panel_before: str = ""
+) -> bool:
     """Return True for no records, or continue as soon as Exportar is ready."""
     elapsed = 0
     step = 250
     while elapsed <= timeout:
         if _page_has_no_records(page):
             return True
-        export_button = page.locator("#ctl00_MainContent_lnkExportar").first
+        if _page_has_report_data(result_panel):
+            return False
         try:
-            if export_button.count() and export_button.is_visible(timeout=100) and export_button.is_enabled():
+            export_button = page.locator("#ctl00_MainContent_lnkExportar").first
+            if (
+                not result_panel
+                and export_button.count()
+                and export_button.is_visible(timeout=100)
+                and export_button.is_enabled()
+            ):
                 return False
         except Exception:
             pass
         try:
             export_text = page.get_by_text("Exportar", exact=True).first
-            if export_text.is_visible(timeout=100) and export_text.is_enabled():
+            if not result_panel and export_text.is_visible(timeout=100) and export_text.is_enabled():
                 return False
         except Exception:
             pass
         page.wait_for_timeout(step)
         elapsed += step
+    return False
+
+
+def _page_has_report_data(result_panel) -> bool:
+    if not result_panel or not result_panel.count():
+        return False
+    try:
+        tables = result_panel.locator("table")
+        for index in range(tables.count()):
+            table = tables.nth(index)
+            if table.locator("tbody tr td").count() > 0:
+                return True
+    except Exception:
+        return False
     return False
 
 
