@@ -12,5 +12,6 @@ config.json
 /output/
 /plantillas/
 /templates/
+/release/
 
 *.log
