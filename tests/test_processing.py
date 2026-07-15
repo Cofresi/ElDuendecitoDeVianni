@@ -384,7 +384,7 @@ def test_work_schedule_sentence_for_six_day_policy() -> None:
 
     assert (
         sentence
-        == "Lunes a Sábados de 2:30 pm a 10:30 pm y Domingo de 1:30 pm a 8:30 pm, "
+        == "Lunes a Sábado de 2:30 pm a 10:30 pm y Domingo de 1:30 pm a 8:30 pm, "
         "con 20 minutos de break y un día libre a la semana según programación, "
         "este horario incluye los días feriados."
     )
@@ -404,6 +404,24 @@ def test_work_schedule_sentence_omits_holidays_when_disabled() -> None:
     assert sentence == "Lunes a Viernes de 7:00 am a 3:00 pm y Sábado de 8:00 am a 2:00 pm."
 
 
+def test_work_schedule_sentence_omits_last_day_when_horario2_is_blank() -> None:
+    sentence = build_work_schedule_sentence(
+        SchedulePolicy(
+            horario1="08:00 AM A 06:00 PM (Almacén)*",
+            horario2="",
+            days=6,
+            break_minutes=None,
+            holidays=True,
+        )
+    )
+
+    assert sentence == (
+        "Lunes a Sábado de 8:00 am a 6:00 pm, con un día libre a la semana según programación, "
+        "este horario incluye los días feriados."
+    )
+    assert "Domingo" not in sentence
+
+
 def test_work_schedule_lookup_enriches_employee(tmp_path: Path) -> None:
     lookup_path = tmp_path / "politica_horario.xlsx"
     make_schedule_lookup(lookup_path)
@@ -411,7 +429,7 @@ def test_work_schedule_lookup_enriches_employee(tmp_path: Path) -> None:
 
     add_work_schedule_sentence(employee, WorkScheduleLookup.from_file(lookup_path))
 
-    assert employee[DERIVED_FIELD].startswith("Lunes a Sábados de 2:30 pm")
+    assert employee[DERIVED_FIELD].startswith("Lunes a Sábado de 2:30 pm")
 
 
 def test_unknown_work_schedule_policy_becomes_blank(tmp_path: Path) -> None:
@@ -467,7 +485,7 @@ def test_docx_template_work_schedule_field(tmp_path: Path) -> None:
     report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
 
     text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
-    assert "Lunes a Sábados de 2:30 pm a 10:30 pm" in text
+    assert "Lunes a Sábado de 2:30 pm a 10:30 pm" in text
 
 
 def test_xlsx_template_preserves_formula_and_formatting(tmp_path: Path) -> None:

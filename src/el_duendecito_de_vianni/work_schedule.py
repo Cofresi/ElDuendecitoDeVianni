@@ -99,7 +99,7 @@ def build_work_schedule_sentence(policy: SchedulePolicy) -> str:
         if horario2:
             sentence += f" y Sábado de {horario2}"
     elif policy.days == 6:
-        sentence = f"Lunes a Sábados de {horario1}"
+        sentence = f"Lunes a Sábado de {horario1}"
         if horario2:
             sentence += f" y Domingo de {horario2}"
     else:
@@ -109,7 +109,7 @@ def build_work_schedule_sentence(policy: SchedulePolicy) -> str:
         sentence += f", con {policy.break_minutes} minutos de break"
 
     if policy.days == 6:
-        connector = " y" if policy.break_minutes else ", y"
+        connector = " y" if policy.break_minutes else ", con"
         sentence += f"{connector} un día libre a la semana según programación"
 
     if policy.holidays:
@@ -120,6 +120,7 @@ def build_work_schedule_sentence(policy: SchedulePolicy) -> str:
 
 def _format_schedule(value: str) -> str:
     text = re.sub(r"\s*\([^)]*\)", "", value).strip()
+    text = re.sub(r"\s*\*+\s*$", "", text)
     text = re.sub(r"\s+[Aa]\s+", " a ", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\b0(\d:\d{2})\s*([AP]M)\b", r"\1 \2", text, flags=re.IGNORECASE)
