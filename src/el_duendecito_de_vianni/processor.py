@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -58,14 +59,20 @@ class DocumentProcessor:
         delete_original: bool = True,
         run_date: date | None = None,
         photo_paths: Mapping[str, str] | None = None,
+        workflow: str = "entradas",
     ) -> RunReport:
         source = Path(source)
         source_hash = file_sha256(source)
         if self.store.is_processed_hash(source_hash) and not force:
             logging.info("Archivo ya procesado: %s", source)
             return RunReport(source_spreadsheet=str(source), already_processed=True, message="Este archivo ya fue procesado.")
-        imported = import_export(source, self.config.imported_folder, run_date=run_date)
-        report = self.process_imported_file(imported.imported_path, run_date=run_date, photo_paths=photo_paths)
+        imported = import_export(source, self.config.imported_folder, run_date=run_date, workflow=workflow)
+        report = self.process_imported_file(
+            imported.imported_path,
+            run_date=run_date,
+            photo_paths=photo_paths,
+            workflow=workflow,
+        )
         report.source_spreadsheet = str(source)
         report.imported_spreadsheet = str(imported.imported_path)
         self.store.add(source, imported.imported_path, imported.file_hash)
@@ -78,11 +85,14 @@ class DocumentProcessor:
         spreadsheet_path: str | Path,
         run_date: date | None = None,
         photo_paths: Mapping[str, str] | None = None,
+        workflow: str = "entradas",
     ) -> RunReport:
         spreadsheet = Path(spreadsheet_path)
         employees = read_employees(spreadsheet)
+        workflow = "salidas" if workflow.casefold() == "salidas" else "entradas"
         date_text = (run_date or datetime.now(DR_TZ).date()).strftime("%d.%m.%Y")
-        final_output = Path(self.config.output_folder) / f"nuevasEntradas_{date_text}" / _run_company_folder(employees)
+        output_label = "nuevasSalidas" if workflow == "salidas" else "nuevasEntradas"
+        final_output = Path(self.config.output_folder) / f"{output_label}_{date_text}" / _run_company_folder(employees)
         temp_output = final_output.with_name(final_output.name + "_tmp")
         if temp_output.exists():
             shutil.rmtree(temp_output)
@@ -91,13 +101,17 @@ class DocumentProcessor:
         report = RunReport(imported_spreadsheet=str(spreadsheet), output_folder=str(final_output))
         try:
             for employee in employees:
-                add_work_schedule_sentence(employee, self.work_schedule_lookup)
+                if workflow == "entradas":
+                    add_work_schedule_sentence(employee, self.work_schedule_lookup)
                 employee_values = dict(employee)
+                _add_employee_name_aliases(employee_values)
                 employee_values["Foto"] = (photo_paths or {}).get(employee.get("Numero", ""), "")
                 employee_dir = temp_output / employee_folder_name(employee)
                 employee_dir.mkdir(parents=True, exist_ok=True)
-                template_folder = template_folder_for_employee(self.config.template_folder, employee)
+                template_folder = template_folder_for_employee(self.config.template_folder, employee, workflow)
                 templates = sorted_templates(template_folder)
+                if workflow == "salidas":
+                    templates = _salidas_templates_for_employee(templates, employee)
                 logging.info(
                     "Usando plantillas de %s para %s",
                     template_folder,
@@ -134,11 +148,58 @@ class DocumentProcessor:
         if report.missing_placeholders:
             logging.warning("Campos faltantes: %s", ", ".join(sorted(report.missing_placeholders)))
         company_name = _display_company_name(employees)
-        report.message = (
-            f"El duendecito de Vianni termino de procesar {report.employees_processed} nuevos empleados de {company_name} "
-            f"y genero {report.document_count} documentos."
-        )
+        if workflow == "salidas":
+            report.message = (
+                f"El duendecito de Vianni termino de procesar {report.employees_processed} salidas de {company_name} "
+                f"y genero {report.document_count} documentos."
+            )
+        else:
+            report.message = (
+                f"El duendecito de Vianni termino de procesar {report.employees_processed} nuevos empleados de {company_name} "
+                f"y genero {report.document_count} documentos."
+            )
         return report
+
+
+def _add_employee_name_aliases(employee: dict[str, str]) -> None:
+    name = employee.get("Nombre Empleado") or employee.get("Nombres Empleado", "")
+    if not employee.get("Nombre Empleado"):
+        employee["Nombre Empleado"] = name
+    if not employee.get("Nombres Empleado"):
+        employee["Nombres Empleado"] = name
+
+
+def _normalized_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in text if not unicodedata.combining(char)).strip().casefold()
+
+
+def _salidas_templates_for_employee(templates: list[Path], employee: dict[str, str]) -> list[Path]:
+    action = _normalized_text(employee.get("Tipo Acción") or employee.get("Tipo Accion"))
+    if "desahucio" in action:
+        selected_action = "desahucio"
+    elif "renuncia" in action:
+        selected_action = "renuncia"
+    else:
+        selected_action = ""
+        logging.warning(
+            "Tipo Acción no reconocido para %s: %s",
+            employee.get("Nombre Empleado") or employee.get("Nombres Empleado", "empleado sin nombre"),
+            employee.get("Tipo Acción") or employee.get("Tipo Accion", ""),
+        )
+
+    selected: list[Path] = []
+    for template in templates:
+        template_name = _normalized_text(template.stem)
+        if "notificacion de desahucio" in template_name:
+            if selected_action == "desahucio":
+                selected.append(template)
+        elif "notificacion de renuncia" in template_name:
+            if selected_action == "renuncia":
+                selected.append(template)
+        else:
+            selected.append(template)
+    return selected
 
 
 def _run_company_folder(employees: list[dict[str, str]]) -> str:

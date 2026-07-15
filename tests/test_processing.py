@@ -339,6 +339,22 @@ def test_tratamiento_filter_gender_values() -> None:
     assert replace_placeholders("{{Sexo|tratamiento}}", {"Sexo": "Sin definir"}, set()) == ""
 
 
+def test_articulo_filter_gender_values() -> None:
+    assert replace_placeholders("{{Sexo|articulo}}", {"Sexo": "F"}, set()) == "La"
+    assert replace_placeholders("{{Sexo|articulo}}", {"Sexo": "Femenino"}, set()) == "La"
+    assert replace_placeholders("{{Sexo|articulo}}", {"Sexo": "M"}, set()) == "El"
+    assert replace_placeholders("{{Sexo|articulo}}", {"Sexo": "Masculino"}, set()) == "El"
+    assert replace_placeholders("{{Sexo|articulo}}", {"Sexo": "Sin definir"}, set()) == ""
+
+
+def test_articulo_minuscula_filter_gender_values() -> None:
+    assert replace_placeholders("{{Sexo|articulo_minuscula}}", {"Sexo": "F"}, set()) == "la"
+    assert replace_placeholders("{{Sexo|articulo_minuscula}}", {"Sexo": "Femenino"}, set()) == "la"
+    assert replace_placeholders("{{Sexo|articulo_minuscula}}", {"Sexo": "M"}, set()) == "el"
+    assert replace_placeholders("{{Sexo|articulo_minuscula}}", {"Sexo": "Masculino"}, set()) == "el"
+    assert replace_placeholders("{{Sexo|articulo_minuscula}}", {"Sexo": "Sin definir"}, set()) == ""
+
+
 def test_genero_ending_filters() -> None:
     assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": "Femenino"}, set()) == "Estimada"
     assert replace_placeholders("Estimad{{Sexo|genero}}", {"Sexo": "Masculino"}, set()) == "Estimado"
@@ -595,6 +611,148 @@ def test_company_template_subfolder_mapping() -> None:
     assert company_template_subfolder({"Compania": "Supermercado Ines"}) == "Ines"
     assert company_template_subfolder({"Compania": "Supermercado Inés"}) == "Brothers"
     assert company_template_subfolder({"Compania": ""}) == "Brothers"
+
+
+def test_company_template_routing_prefers_nested_entradas_folder(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    nested_folder = Path(config.template_folder) / "Entradas" / "Ines"
+    legacy_folder = Path(config.template_folder) / "Ines"
+    nested_folder.mkdir(parents=True)
+    legacy_folder.mkdir(parents=True)
+    make_docx(nested_folder / "01_Nueva.docx", "Nueva {{Nombre Empleado}}")
+    make_docx(legacy_folder / "01_Antigua.docx", "Antigua {{Nombre Empleado}}")
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Compania": "Supermercado Ines"}],
+    )
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    assert [Path(path).name for path in report.generated_documents] == ["01_Nueva.docx"]
+
+
+def test_company_template_routing_supports_legacy_flat_folder(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    nested_folder = Path(config.template_folder) / "Entradas" / "Ines"
+    legacy_folder = Path(config.template_folder) / "Ines"
+    nested_folder.mkdir(parents=True)
+    legacy_folder.mkdir(parents=True)
+    make_docx(legacy_folder / "01_Antigua.docx", "Antigua {{Nombre Empleado}}")
+    make_employee_sheet(
+        tmp_path / "employees.xlsx",
+        [{"Numero": 1, "Nombre Empleado": "ANA", "Compania": "Supermercado Ines"}],
+    )
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx")
+
+    assert [Path(path).name for path in report.generated_documents] == ["01_Antigua.docx"]
+
+
+def test_salidas_uses_salidas_templates_and_deletes_download(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    salidas_folder = Path(config.template_folder) / "Salidas" / "Ines"
+    entradas_folder = Path(config.template_folder) / "Entradas" / "Ines"
+    salidas_folder.mkdir(parents=True)
+    entradas_folder.mkdir(parents=True)
+    make_docx(salidas_folder / "01_Salida.docx", "Salida {{Nombre Empleado}} {{Fecha Acción}}")
+    make_docx(entradas_folder / "01_Entrada.docx", "Entrada {{Nombre Empleado}}")
+    download = tmp_path / "SalidasDeHoy_Supermercado_Ines.xlsx"
+    make_employee_sheet(
+        download,
+        [
+            {
+                "Numero": 1,
+                "Nombre Empleado": "ANA",
+                "Compania": "Supermercado Ines",
+                "Fecha Acción": date(2026, 7, 14),
+            }
+        ],
+    )
+
+    report = DocumentProcessor(config).process_export_file(
+        download,
+        force=True,
+        delete_original=True,
+        run_date=date(2026, 7, 14),
+        workflow="salidas",
+    )
+
+    assert not download.exists()
+    assert Path(report.imported_spreadsheet).name == "nuevasSalidas_14.07.2026.xlsx"
+    assert Path(report.output_folder).parent.name == "nuevasSalidas_14.07.2026"
+    assert [Path(path).name for path in report.generated_documents] == ["01_Salida.docx"]
+    generated_text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
+    assert generated_text == "Salida ANA 14/07/2026"
+    assert "1 salidas" in report.message
+
+
+def test_salidas_supports_plural_employee_name_column(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    salidas_folder = Path(config.template_folder) / "Salidas" / "Brothers"
+    salidas_folder.mkdir(parents=True)
+    make_docx(salidas_folder / "01_Salida.docx", "{{Nombre Empleado}} / {{Nombres Empleado}}")
+    spreadsheet = tmp_path / "salidas.xlsx"
+    make_employee_sheet(
+        spreadsheet,
+        [{"Numero": 2, "Nombres Empleado": "LUIS", "Compania": "Brothers"}],
+    )
+
+    report = DocumentProcessor(config).process_imported_file(spreadsheet, workflow="salidas")
+
+    assert Path(report.generated_documents[0]).parent.name == "2 - LUIS"
+    generated_text = "\n".join(p.text for p in Document(report.generated_documents[0]).paragraphs)
+    assert generated_text == "LUIS / LUIS"
+
+
+def test_salidas_selects_notification_from_action_type(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    salidas_folder = Path(config.template_folder) / "Salidas" / "Ines"
+    salidas_folder.mkdir(parents=True)
+    make_docx(salidas_folder / "1_NOTIFICACION DE DESAHUCIO.docx", "Desahucio {{Nombre Empleado}}")
+    make_docx(salidas_folder / "1_NOTIFICACION DE RENUNCIA.docx", "Renuncia {{Nombre Empleado}}")
+    make_docx(salidas_folder / "2_COMUNICADO DE SALIDA.docx", "Comunicado {{Nombre Empleado}}")
+    spreadsheet = tmp_path / "salidas.xlsx"
+    make_employee_sheet(
+        spreadsheet,
+        [
+            {
+                "Numero": 1,
+                "Nombre Empleado": "ANA",
+                "Compania": "Supermercado Ines",
+                "Tipo Acción": "Desahucio",
+            },
+            {
+                "Numero": 2,
+                "Nombre Empleado": "LUIS",
+                "Compania": "Supermercado Ines",
+                "Tipo Acción": "Renuncia",
+            },
+        ],
+    )
+
+    report = DocumentProcessor(config).process_imported_file(spreadsheet, workflow="salidas")
+
+    ana_documents = sorted(path.name for path in (Path(report.output_folder) / "1 - ANA").iterdir())
+    luis_documents = sorted(path.name for path in (Path(report.output_folder) / "2 - LUIS").iterdir())
+    assert ana_documents == ["1_NOTIFICACION DE DESAHUCIO.docx", "2_COMUNICADO DE SALIDA.docx"]
+    assert luis_documents == ["1_NOTIFICACION DE RENUNCIA.docx", "2_COMUNICADO DE SALIDA.docx"]
+
+
+def test_salidas_action_type_accepts_unaccented_column_name(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    salidas_folder = Path(config.template_folder) / "Salidas" / "Brothers"
+    salidas_folder.mkdir(parents=True)
+    make_docx(salidas_folder / "1_NOTIFICACION DE DESAHUCIO.docx", "Desahucio")
+    make_docx(salidas_folder / "1_NOTIFICACION DE RENUNCIA.docx", "Renuncia")
+    spreadsheet = tmp_path / "salidas.xlsx"
+    make_employee_sheet(
+        spreadsheet,
+        [{"Numero": 3, "Nombre Empleado": "MARIA", "Compania": "Brothers", "Tipo Accion": "RENUNCIA"}],
+    )
+
+    report = DocumentProcessor(config).process_imported_file(spreadsheet, workflow="salidas")
+
+    assert [Path(path).name for path in report.generated_documents] == ["1_NOTIFICACION DE RENUNCIA.docx"]
 
 
 def test_processing_message_includes_company_name(tmp_path: Path) -> None:

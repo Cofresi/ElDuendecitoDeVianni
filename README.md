@@ -13,6 +13,8 @@ La aplicacion procesa los archivos descargados desde Mercury cuando el usuario i
 
 Cuando encuentra uno, lo copia a `imported_files`, lo renombra como `nuevasEntradas_dd.mm.yyyy`, lee los empleados, genera documentos desde las plantillas y guarda todo en una carpeta fechada dentro de `output`.
 
+El flujo `Salidas` hace el proceso analogo con el reporte `SalidasDeHoy`: conserva una copia como `nuevasSalidas_dd.mm.yyyy`, genera los documentos desde `plantillas/Salidas`, los guarda en `output/nuevasSalidas_dd.mm.yyyy` y elimina el archivo descargado despues de completar el procesamiento correctamente.
+
 ## Instalacion para desarrollo
 
 Requisitos:
@@ -34,8 +36,12 @@ py -3.12 -m venv .venv
 
 ```text
 plantillas/
-  Brothers/
-  Ines/
+  Entradas/
+    Brothers/
+    Ines/
+  Salidas/
+    Brothers/
+    Ines/
 imported_files/
 output/
 logs/
@@ -75,10 +81,14 @@ Las fotos de empleados quedan para una fase posterior.
 
 Coloque las plantillas en una de estas carpetas:
 
-- `plantillas/Brothers`
-- `plantillas/Ines`
+- `plantillas/Entradas/Brothers`
+- `plantillas/Entradas/Ines`
 
-Cuando el campo `Compania` del exporte contiene exactamente `Supermercado Ines`, la aplicacion usa solo las plantillas de `plantillas/Ines`. Para cualquier otro valor de `Compania`, usa solo las plantillas de `plantillas/Brothers`.
+Cuando el campo `Compania` del exporte contiene exactamente `Supermercado Ines`, la aplicacion usa solo las plantillas de `plantillas/Entradas/Ines`. Para cualquier otro valor de `Compania`, usa solo las plantillas de `plantillas/Entradas/Brothers`.
+
+Las plantillas de salidas se guardan por separado en `plantillas/Salidas/Ines` y `plantillas/Salidas/Brothers`.
+
+Para cada salida, el campo `Tipo Acción` decide cual notificacion se genera: `Desahucio` usa la plantilla cuyo nombre contiene `NOTIFICACION DE DESAHUCIO`, mientras que `Renuncia` usa la plantilla cuyo nombre contiene `NOTIFICACION DE RENUNCIA`. Las demas plantillas de la carpeta, como `COMUNICADO DE SALIDA`, se generan en ambos casos.
 
 Dentro de cada carpeta, las plantillas se procesan en orden alfabetico, por eso se recomienda nombrarlas asi:
 
@@ -106,13 +116,15 @@ Tambien puede aplicar formatos simples agregando `|formato` al marcador:
 {{Numero|int}}              -> 295
 {{Fecha Ingreso|date}}      -> 04/07/2026
 {{Sexo|tratamiento}}        -> Sra. / Sr.
+{{Sexo|articulo}}           -> La / El
+{{Sexo|articulo_minuscula}} -> la / el
 Estimad{{Sexo|genero}}      -> Estimada / Estimado
 Estimad{{Sexo|genero_plural}} -> Estimadas / Estimados
 colaborador{{Sexo|genero_sustantivo}} -> colaboradora / colaborador
 colaborador{{Sexo|genero_sustantivo_plural}} -> colaboradoras / colaboradores
 ```
 
-Los formatos disponibles son `money`, `int`, `date`, `tratamiento`, `genero`, `genero_plural`, `genero_sustantivo` y `genero_sustantivo_plural`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. `genero` genera `a` u `o`, y `genero_plural` genera `as` u `os`. `genero_sustantivo` genera `a` o vacio, y `genero_sustantivo_plural` genera `as` o `es`. Si no se indica formato, el valor se inserta como texto normal.
+Los formatos disponibles son `money`, `int`, `date`, `tratamiento`, `articulo`, `articulo_minuscula`, `genero`, `genero_plural`, `genero_sustantivo` y `genero_sustantivo_plural`. Para `tratamiento`, los valores femeninos como `F`, `Fem`, `Femenino` o `Mujer` generan `Sra.`, y los valores masculinos como `M`, `Masc`, `Masculino` o `Hombre` generan `Sr.`. `articulo` genera `La` o `El`, y `articulo_minuscula` genera `la` o `el`. `genero` genera `a` u `o`, y `genero_plural` genera `as` u `os`. `genero_sustantivo` genera `a` o vacio, y `genero_sustantivo_plural` genera `as` o `es`. Si no se indica formato, el valor se inserta como texto normal.
 
 ### Horario laboral
 

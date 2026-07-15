@@ -6,7 +6,7 @@ import re
 import shutil
 import tempfile
 import time
-from datetime import date
+from datetime import date, timedelta
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
@@ -35,8 +35,30 @@ def run_mercury_login_test(config: AppConfig, password: str) -> MercuryRunResult
     return run_mercury_export(config, password, download_report=False)
 
 
+def run_mercury_salidas(config: AppConfig, password: str, report_date: date) -> MercuryRunResult:
+    return run_mercury_export(
+        config,
+        password,
+        report_date=report_date,
+        report_name="SalidasDeHoy",
+        filter_field_label="Fecha Acción",
+        filter_end_date=report_date + timedelta(days=1),
+        file_prefix="SalidasDeHoy",
+        fetch_photos=False,
+    )
+
+
 def run_mercury_export(
-    config: AppConfig, password: str, download_report: bool = True, report_date: date | None = None
+    config: AppConfig,
+    password: str,
+    download_report: bool = True,
+    report_date: date | None = None,
+    *,
+    report_name: str | None = None,
+    filter_field_label: str = "Fecha Ingreso",
+    filter_end_date: date | None = None,
+    file_prefix: str = "GridViewExport",
+    fetch_photos: bool = True,
 ) -> MercuryRunResult:
     if not config.mercury_url.strip():
         raise MercuryAutomationError("Configure primero la direccion de Mercury.")
@@ -77,14 +99,24 @@ def run_mercury_export(
                 page = context.new_page()
                 try:
                     _open_authenticated_session(page, config, password)
-                    downloaded = _download_existing_report(page, config, company, report_date=report_date)
+                    downloaded = _download_existing_report(
+                        page,
+                        config,
+                        company,
+                        report_name=report_name or config.mercury_report_name,
+                        filter_field_label=filter_field_label,
+                        start_date=report_date,
+                        end_date=filter_end_date or report_date,
+                        file_prefix=file_prefix,
+                    )
                     if downloaded:
                         downloaded_files.append(str(downloaded))
-                        if not photo_temp_dir:
+                        if fetch_photos and not photo_temp_dir:
                             photo_temp_dir = tempfile.mkdtemp(prefix="duendecito-fotos-", dir=downloads)
-                        photo_files[str(downloaded)] = _download_employee_photos(
-                            page, config, downloaded, company, Path(photo_temp_dir)
-                        )
+                        if fetch_photos:
+                            photo_files[str(downloaded)] = _download_employee_photos(
+                                page, config, downloaded, company, Path(photo_temp_dir)
+                            )
                         logging.info("Reporte de Mercury descargado para %s: %s", company, downloaded)
                     else:
                         empty_companies.append(company)
@@ -198,14 +230,21 @@ def _fill_login_form(page, username: str, password: str) -> None:
 
 
 def _download_existing_report(
-    page, config: AppConfig, company_name: str, report_date: date | None = None
+    page,
+    config: AppConfig,
+    company_name: str,
+    report_name: str,
+    filter_field_label: str,
+    start_date: date | None,
+    end_date: date | None,
+    file_prefix: str,
 ) -> Path | None:
     _select_company(page, company_name)
     _open_human_resources(page)
     _open_report_generator(page, config)
-    _open_saved_report(page, config.mercury_report_name)
-    if report_date:
-        _apply_report_date_filter(page, report_date)
+    _open_saved_report(page, report_name)
+    if start_date:
+        _apply_report_date_range_filter(page, filter_field_label, start_date, end_date or start_date)
     result_panel = page.locator("#ctl00_MainContent_tabGeneral_ctl05").first
     result_panel_before = result_panel.inner_html() if result_panel.count() else ""
     process_button = page.locator("#ctl00_MainContent_lnkProcesar").first
@@ -244,7 +283,7 @@ def _download_existing_report(
             return None
         raise
     suffix = Path(download.suggested_filename or "").suffix or ".xlsx"
-    target = downloads / f"GridViewExport_{_company_file_label(company_name)}{suffix}"
+    target = downloads / f"{file_prefix}_{_company_file_label(company_name)}{suffix}"
     download.save_as(target)
     return target
 
@@ -371,6 +410,55 @@ def _format_mercury_date(value: date) -> str:
 
 
 def _apply_report_date_filter(page, report_date: date) -> None:
+    _apply_report_date_range_filter(page, "Fecha Ingreso", report_date, report_date)
+
+
+def _normalize_mercury_text(value: str) -> str:
+    import unicodedata
+
+    return " ".join(
+        unicodedata.normalize("NFD", value or "")
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .casefold()
+        .split()
+    )
+
+
+def _select_mercury_option(page, select, label: str) -> None:
+    wanted = _normalize_mercury_text(label)
+    options = select.locator("option")
+    for index in range(options.count()):
+        option = options.nth(index)
+        text = option.inner_text()
+        value = option.get_attribute("value") or ""
+        if _normalize_mercury_text(text) == wanted or _normalize_mercury_text(value) == wanted:
+            if select.input_value() != value:
+                select.select_option(value)
+                page.wait_for_timeout(1_000)
+            return
+    raise MercuryAutomationError(f"No se encontro la opcion Mercury '{label}'.")
+
+
+def _find_mercury_filter_rows(page, field_label: str):
+    wanted = _normalize_mercury_text(field_label)
+    fields = page.locator("select[id*='cboCampo']")
+    matches = []
+    for index in range(fields.count()):
+        field = fields.nth(index)
+        if not field.is_visible():
+            continue
+        options = field.locator("option")
+        if not any(_normalize_mercury_text(options.nth(option_index).inner_text()) == wanted for option_index in range(options.count())):
+            continue
+        row = field.locator("xpath=ancestor::tr[1]")
+        checkbox = row.locator("input[type='checkbox']").first
+        if row.count() and checkbox.count() and checkbox.is_checked():
+            matches.append(row)
+    return matches
+
+
+def _apply_report_date_range_filter(page, field_label: str, start_date: date, end_date: date) -> None:
     filter_tab = page.locator("#__tab_ctl00_MainContent_tabGeneral_ctl03").first
     if filter_tab.count():
         filter_tab.click(timeout=5_000)
@@ -385,41 +473,46 @@ def _apply_report_date_filter(page, report_date: date) -> None:
         except Exception:
             logging.info("Mercury no confirmo el indice activo de Filtros; se valida el panel directamente.")
     elif not _click_any_visible_text(page, ("Filtros", "Filters"), timeout=3_000):
-        raise MercuryAutomationError("Mercury no mostro la pestana Filtros para ajustar la Fecha Ingreso.")
-    display_date = _format_mercury_date(report_date)
+        raise MercuryAutomationError(f"Mercury no mostro la pestana Filtros para ajustar {field_label}.")
+    display_start = _format_mercury_date(start_date)
+    display_end = _format_mercury_date(end_date)
     try:
-        rows = (
-            ("1", "Desde", "11", "chkSel1"),
-            ("2", "Hasta", "12", "chkSel2"),
-        )
-        for row_number, operation_name, input_number, checkbox_name in rows:
-            field = page.locator(f"select[id$='cboCampo{row_number}']").first
-            operation = page.locator(f"select[id$='cboOperador{row_number}']").first
-            value = page.locator(f"input[id$='txtCriterio{input_number}']").first
-            checkbox = page.locator(f"input[id$='{checkbox_name}']").first
-
-            field.wait_for(state="visible", timeout=12_000)
-            operation.wait_for(state="visible", timeout=12_000)
-            value.wait_for(state="visible", timeout=12_000)
+        matching_rows = _find_mercury_filter_rows(page, field_label)
+        if len(matching_rows) < 2:
+            raise MercuryAutomationError(
+                f"Mercury mostro {len(matching_rows)} filtros '{field_label}'; se necesitaban al menos 2."
+            )
+        for row_index in (0, 1):
+            row = _find_mercury_filter_rows(page, field_label)[-2 + row_index]
+            checkbox = row.locator("input[type='checkbox']").first
             if not checkbox.is_checked():
                 checkbox.check()
                 page.wait_for_timeout(1_000)
 
-            if field.input_value() != "Fecha_Ingreso":
-                field.select_option("Fecha_Ingreso")
-            if operation.input_value() != operation_name:
-                operation.select_option(operation_name)
-                page.wait_for_timeout(1_000)
+        for row, display_date, operation_name in zip(
+            _find_mercury_filter_rows(page, field_label)[-2:],
+            (display_start, display_end),
+            ("Desde", "Hasta"),
+        ):
+            field = row.locator("select[id*='cboCampo']").first
+            operation = row.locator("select[id*='cboOperador']").first
+            value = row.locator("input[type='text'], textarea").last
+
+            field.wait_for(state="visible", timeout=12_000)
+            operation.wait_for(state="visible", timeout=12_000)
+            value.wait_for(state="visible", timeout=12_000)
+            _select_mercury_option(page, field, field_label)
+            _select_mercury_option(page, operation, operation_name)
             value.click()
             value.fill(display_date)
             value.press("Tab")
             if value.input_value() != display_date:
                 raise MercuryAutomationError(f"Mercury no mantuvo la fecha {display_date} en {value.get_attribute('id')}.")
         page.wait_for_timeout(300)
-        logging.info("Filtro Fecha Ingreso Mercury aplicado: %s desde/hasta.", display_date)
+        logging.info("Filtro %s Mercury aplicado: %s desde / %s hasta.", field_label, display_start, display_end)
         return
     except Exception as exc:
-        raise MercuryAutomationError(f"Mercury no pudo ajustar Fecha Ingreso en Filtros: {exc}") from exc
+        raise MercuryAutomationError(f"Mercury no pudo ajustar {field_label} en Filtros: {exc}") from exc
 
     # Fallback retained for older Mercury layouts without the known control IDs.
     filter_frame = _wait_for_filter_controls(page, timeout=12_000) or page.main_frame

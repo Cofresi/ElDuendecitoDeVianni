@@ -35,20 +35,31 @@ def find_export(downloads_folder: str | Path) -> Path | None:
     return None
 
 
-def _target_path(imported_folder: Path, suffix: str, run_date: date | None = None) -> Path:
+def _target_path(
+    imported_folder: Path,
+    suffix: str,
+    run_date: date | None = None,
+    workflow: str = "entradas",
+) -> Path:
     date_text = (run_date or datetime.now(DR_TZ).date()).strftime("%d.%m.%Y")
-    base = imported_folder / f"nuevasEntradas_{date_text}{suffix}"
+    label = "nuevasSalidas" if workflow.casefold() == "salidas" else "nuevasEntradas"
+    base = imported_folder / f"{label}_{date_text}{suffix}"
     if not base.exists():
         return base
     stamped = datetime.now(DR_TZ).strftime("%H%M%S")
-    return imported_folder / f"nuevasEntradas_{date_text}_{stamped}{suffix}"
+    return imported_folder / f"{label}_{date_text}_{stamped}{suffix}"
 
 
-def import_export(source: str | Path, imported_folder: str | Path, run_date: date | None = None) -> ImportResult:
+def import_export(
+    source: str | Path,
+    imported_folder: str | Path,
+    run_date: date | None = None,
+    workflow: str = "entradas",
+) -> ImportResult:
     source_path = Path(source)
     imported_dir = Path(imported_folder)
     imported_dir.mkdir(parents=True, exist_ok=True)
-    target = _target_path(imported_dir, source_path.suffix.lower(), run_date)
+    target = _target_path(imported_dir, source_path.suffix.lower(), run_date, workflow)
     temp_target = target.with_suffix(target.suffix + ".tmp")
     shutil.copy2(source_path, temp_target)
     if file_sha256(source_path) != file_sha256(temp_target):

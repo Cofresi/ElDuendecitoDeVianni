@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from .config import AppConfig, ensure_directories, get_app_root, load_config, save_config
 from .credentials import has_mercury_password, load_mercury_password, save_mercury_password
 from .logging_utils import configure_logging
-from .mercury import MercuryAutomationError, run_mercury_export
+from .mercury import MercuryAutomationError, run_mercury_export, run_mercury_salidas
 from .office import open_folder, print_file, set_start_with_windows
 from .processor import DocumentProcessor, RunReport
 from .spreadsheet import has_employee_rows
@@ -182,16 +182,20 @@ class MercuryWorker(QObject):
     finished = Signal(object)
     failed = Signal(object)
 
-    def __init__(self, config: AppConfig, password: str, report_date: date):
+    def __init__(self, config: AppConfig, password: str, report_date: date, workflow: str = "entradas"):
         super().__init__()
         self.config = config
         self.password = password
         self.report_date = report_date
+        self.workflow = workflow
 
     @Slot()
     def run(self) -> None:
         try:
-            result = run_mercury_export(self.config, self.password, report_date=self.report_date)
+            if self.workflow == "salidas":
+                result = run_mercury_salidas(self.config, self.password, self.report_date)
+            else:
+                result = run_mercury_export(self.config, self.password, report_date=self.report_date)
         except Exception as exc:
             self.failed.emit(exc)
         else:
@@ -442,6 +446,7 @@ class MainWindow(QMainWindow):
         self.mercury_thread: QThread | None = None
         self.mercury_worker: MercuryWorker | None = None
         self.mercury_busy = False
+        self.mercury_workflow = "entradas"
         self.busy_status_timer = QTimer(self)
         self.busy_status_timer.timeout.connect(self._advance_busy_status)
         self.busy_started_at = 0.0
@@ -651,12 +656,7 @@ class MainWindow(QMainWindow):
         self.run_mercury(self._selected_entries_date())
 
     def run_salidas(self) -> None:
-        selected = self._selected_departures_date().strftime("%d/%m/%Y")
-        QMessageBox.information(
-            self,
-            "Salidas",
-            f"La funcion de salidas para {selected} sera el proximo flujo que vamos a construir.",
-        )
+        self.run_mercury(self._selected_departures_date(), workflow="salidas")
 
     def _selected_entries_date(self) -> date:
         return self.entries_date.date().toPython()
@@ -727,18 +727,20 @@ class MainWindow(QMainWindow):
         if os.name == "nt":
             os.startfile(self.log_path)  # type: ignore[attr-defined]
 
-    def run_mercury(self, report_date: date | None = None) -> None:
+    def run_mercury(self, report_date: date | None = None, workflow: str = "entradas") -> None:
         report_date = report_date or date.today()
         if self.mercury_busy:
             self.append_log("El duendecito ya esta trabajando con Mercury.")
             return
-        self.append_log(f"El duendecito esta buscando entradas de {report_date:%d/%m/%Y} en Mercury...")
+        subject = "salidas" if workflow == "salidas" else "entradas"
+        self.append_log(f"El duendecito esta buscando {subject} de {report_date:%d/%m/%Y} en Mercury...")
         self.last_scan = datetime.now().strftime("%d/%m/%Y %H:%M")
         self.start_busy_progress("Entrando a Mercury y preparando la descarga...")
         self.mercury_busy = True
         self.mercury_report_date = report_date
+        self.mercury_workflow = workflow
         self.mercury_thread = QThread(self)
-        self.mercury_worker = MercuryWorker(self.config, load_mercury_password(), report_date)
+        self.mercury_worker = MercuryWorker(self.config, load_mercury_password(), report_date, workflow)
         self.mercury_worker.moveToThread(self.mercury_thread)
         self.mercury_thread.started.connect(self.mercury_worker.run)
         self.mercury_worker.finished.connect(self._handle_mercury_result)
@@ -786,6 +788,7 @@ class MainWindow(QMainWindow):
                             delete_original=True,
                             run_date=report_date,
                             photo_paths=result.photo_files.get(downloaded_file, {}),
+                            workflow=self.mercury_workflow,
                         )
                     )
                 else:
@@ -805,10 +808,17 @@ class MainWindow(QMainWindow):
         for company in result.companies_without_download:
             self.append_log(f"Mercury no genero archivo para {company}.")
         for filename in empty_files:
-            self.append_log(f"{filename} no tiene nuevas entradas.")
+            if self.mercury_workflow == "salidas":
+                self.append_log(f"{filename} no tiene salidas para la fecha seleccionada.")
+            else:
+                self.append_log(f"{filename} no tiene nuevas entradas.")
         if not processed_reports:
-            self.set_progress(100, "No hay nuevas entradas para procesar.")
-            QMessageBox.information(self, "Mercury", "No hay nuevas entradas para procesar.")
+            if self.mercury_workflow == "salidas":
+                empty_message = "No hay salidas para procesar."
+            else:
+                empty_message = "No hay nuevas entradas para procesar."
+            self.set_progress(100, empty_message)
+            QMessageBox.information(self, "Mercury", empty_message)
             self.refresh_status()
             return
         self.set_progress(100, "Documentos generados.")

@@ -79,6 +79,15 @@ def _format_treatment(value: str) -> str:
     return ""
 
 
+def _format_article(value: str, lowercase: bool = False) -> str:
+    gender = _gender_code(value)
+    if gender == "f":
+        return "la" if lowercase else "La"
+    if gender == "m":
+        return "el" if lowercase else "El"
+    return ""
+
+
 def _gender_code(value: str) -> str:
     text = str(value or "").strip().casefold()
     if text in {"f", "fem", "femenino", "mujer"}:
@@ -117,6 +126,10 @@ def _format_placeholder_value(value: str, formatter: str) -> str:
         return _format_date(value)
     if formatter == "tratamiento":
         return _format_treatment(value)
+    if formatter == "articulo":
+        return _format_article(value)
+    if formatter == "articulo_minuscula":
+        return _format_article(value, lowercase=True)
     if formatter == "genero":
         return _format_gender_ending(value)
     if formatter == "genero_plural":

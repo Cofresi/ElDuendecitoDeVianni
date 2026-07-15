@@ -17,7 +17,7 @@ def safe_filename(value: object, fallback: str = "SIN_NOMBRE") -> str:
 
 def employee_folder_name(row: dict[str, str]) -> str:
     number = safe_filename(row.get("Numero", ""), "SIN_NUMERO")
-    name = safe_filename(row.get("Nombre Empleado", ""), "SIN_NOMBRE")
+    name = safe_filename(row.get("Nombre Empleado") or row.get("Nombres Empleado", ""), "SIN_NOMBRE")
     return safe_filename(f"{number} - {name}")
 
 
@@ -28,11 +28,24 @@ def company_template_subfolder(row: dict[str, str]) -> str:
     return "Brothers"
 
 
-def template_folder_for_employee(base_folder: str | Path, row: dict[str, str]) -> Path:
+def template_folder_for_employee(
+    base_folder: str | Path,
+    row: dict[str, str],
+    workflow: str = "Entradas",
+) -> Path:
     base = Path(base_folder)
-    company_folder = base / company_template_subfolder(row)
-    if company_folder.exists():
-        return company_folder
+    company = company_template_subfolder(row)
+    workflow_company_folder = base / workflow.capitalize() / company
+    legacy_company_folder = base / company
+
+    if sorted_templates(workflow_company_folder):
+        return workflow_company_folder
+    if sorted_templates(legacy_company_folder):
+        return legacy_company_folder
+    if workflow_company_folder.exists():
+        return workflow_company_folder
+    if legacy_company_folder.exists():
+        return legacy_company_folder
     return base
 
 
