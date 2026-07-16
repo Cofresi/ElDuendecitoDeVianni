@@ -156,18 +156,45 @@ def replace_placeholders(text: str, values: dict[str, str], missing: set[str]) -
 
 
 def _replace_paragraph(paragraph, values: dict[str, str], missing: set[str]) -> None:
-    full_text = "".join(run.text for run in paragraph.runs)
+    runs = list(paragraph.runs)
+    full_text = "".join(run.text for run in runs)
     if "{{" not in full_text:
         return
-    replaced = replace_placeholders(full_text, values, missing)
-    if replaced == full_text:
+    matches = list(PLACEHOLDER_RE.finditer(full_text))
+    if not matches:
         return
-    if paragraph.runs:
-        paragraph.runs[0].text = replaced
-        for run in paragraph.runs[1:]:
-            run.text = ""
-    else:
-        paragraph.add_run(replaced)
+
+    run_starts: list[int] = []
+    position = 0
+    for run in runs:
+        run_starts.append(position)
+        position += len(run.text)
+
+    for match in reversed(matches):
+        replacement = replace_placeholders(match.group(0), values, missing)
+        start_index = next(
+            index
+            for index, start in reversed(list(enumerate(run_starts)))
+            if start <= match.start()
+        )
+        end_character = match.end() - 1
+        end_index = next(
+            index
+            for index, start in reversed(list(enumerate(run_starts)))
+            if start <= end_character
+        )
+        start_offset = match.start() - run_starts[start_index]
+        end_offset = match.end() - run_starts[end_index]
+
+        if start_index == end_index:
+            text = runs[start_index].text
+            runs[start_index].text = text[:start_offset] + replacement + text[end_offset:]
+            continue
+
+        runs[start_index].text = runs[start_index].text[:start_offset] + replacement
+        for index in range(start_index + 1, end_index):
+            runs[index].text = ""
+        runs[end_index].text = runs[end_index].text[end_offset:]
 
 
 def _iter_paragraphs(container):

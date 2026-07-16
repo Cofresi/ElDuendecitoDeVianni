@@ -4,12 +4,18 @@ from base64 import b64decode
 from copy import copy
 from datetime import date
 from pathlib import Path
+import sys
+from types import ModuleType
+from zipfile import ZipFile
 
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from openpyxl import Workbook, load_workbook
 
 from el_duendecito_de_vianni.config import AppConfig
 from el_duendecito_de_vianni.importer import import_export
+from el_duendecito_de_vianni.office import docx_has_word_fields, update_word_fields
 from el_duendecito_de_vianni.processed_store import ProcessedStore, file_sha256
 from el_duendecito_de_vianni.processor import DocumentProcessor
 from el_duendecito_de_vianni.spreadsheet import read_employees
@@ -71,6 +77,26 @@ def make_docx(path: Path, text: str) -> None:
     document.save(path)
 
 
+def add_time_field(paragraph, cached_value: str = "14 de julio de 2026") -> None:
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    paragraph.add_run()._r.append(begin)
+
+    instruction = OxmlElement("w:instrText")
+    instruction.set(qn("xml:space"), "preserve")
+    instruction.text = ' TIME \\@ "d \'de\' MMMM \'de\' yyyy" '
+    paragraph.add_run()._r.append(instruction)
+
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    paragraph.add_run()._r.append(separate)
+    paragraph.add_run(cached_value)
+
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    paragraph.add_run()._r.append(end)
+
+
 def make_schedule_lookup(path: Path) -> None:
     workbook = Workbook()
     sheet = workbook.active
@@ -94,6 +120,31 @@ def test_one_employee_and_one_docx_template(tmp_path: Path) -> None:
     generated = Path(report.generated_documents[0])
     assert generated.exists()
     assert "Hola ALANNA" in "\n".join(p.text for p in Document(generated).paragraphs)
+
+
+def test_entradas_documents_are_sent_to_word_field_refresh(tmp_path: Path, monkeypatch) -> None:
+    config = make_config(tmp_path)
+    template_folder = Path(config.template_folder)
+    template_folder.mkdir(parents=True)
+    make_employee_sheet(tmp_path / "employees.xlsx", [{"Numero": 295, "Nombre Empleado": "ALANNA"}])
+    template = template_folder / "01_Contrato.docx"
+    document = Document()
+    paragraph = document.add_paragraph("Fecha: ")
+    add_time_field(paragraph)
+    paragraph.add_run(" - {{Nombre Empleado}}")
+    document.save(template)
+    refreshed_batches: list[list[Path]] = []
+
+    def record_refresh(paths) -> None:
+        refreshed_batches.append([Path(path) for path in paths])
+
+    monkeypatch.setattr("el_duendecito_de_vianni.processor.update_word_fields", record_refresh)
+
+    report = DocumentProcessor(config).process_imported_file(tmp_path / "employees.xlsx", workflow="entradas")
+
+    assert report.document_count == 1
+    assert len(refreshed_batches) == 1
+    assert [path.name for path in refreshed_batches[0]] == ["01_Contrato.docx"]
 
 
 def test_multiple_employees_and_multiple_templates(tmp_path: Path) -> None:
@@ -309,6 +360,104 @@ def test_placeholder_split_across_word_runs(tmp_path: Path) -> None:
     text = "\n".join(p.text for p in Document(path).paragraphs)
     assert text == "Hola ANA"
     assert not missing
+
+
+def test_placeholder_replacement_preserves_word_time_field(tmp_path: Path) -> None:
+    path = tmp_path / "dynamic-date.docx"
+    document = Document()
+    paragraph = document.add_paragraph("A partir de hoy ")
+    add_time_field(paragraph)
+    paragraph.add_run(" trabaja desde el {{Fecha Ingreso}}.")
+    document.save(path)
+
+    missing: set[str] = set()
+    process_docx(path, {"Fecha Ingreso": "04/07/2026"}, missing)
+
+    text = "\n".join(p.text for p in Document(path).paragraphs)
+    with ZipFile(path) as archive:
+        document_xml = archive.read("word/document.xml")
+    assert "14 de julio de 2026" in text
+    assert "04/07/2026" in text
+    assert b"TIME" in document_xml
+    assert docx_has_word_fields(path)
+    assert not missing
+
+
+def test_update_word_fields_uses_one_hidden_word_session(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "dynamic-date.docx"
+    document = Document()
+    add_time_field(document.add_paragraph())
+    document.save(path)
+
+    class FakeFields:
+        def __init__(self):
+            self.update_count = 0
+
+        def Update(self):
+            self.update_count += 1
+
+    class FakeStoryRange:
+        def __init__(self):
+            self.Fields = FakeFields()
+            self.NextStoryRange = None
+
+    class FakeDocument:
+        def __init__(self):
+            self.Fields = FakeFields()
+            self.StoryRanges = [FakeStoryRange()]
+            self.saved = False
+            self.closed = False
+
+        def Save(self):
+            self.saved = True
+
+        def Close(self, SaveChanges=False):
+            self.closed = True
+
+    fake_document = FakeDocument()
+
+    class FakeDocuments:
+        def __init__(self):
+            self.opened_paths: list[str] = []
+
+        def Open(self, path, **kwargs):
+            self.opened_paths.append(path)
+            return fake_document
+
+    class FakeWord:
+        def __init__(self):
+            self.Documents = FakeDocuments()
+            self.Visible = True
+            self.DisplayAlerts = 1
+            self.quit_called = False
+
+        def Quit(self):
+            self.quit_called = True
+
+    fake_word = FakeWord()
+    com_calls: list[str] = []
+    pythoncom = ModuleType("pythoncom")
+    pythoncom.CoInitialize = lambda: com_calls.append("initialize")
+    pythoncom.CoUninitialize = lambda: com_calls.append("uninitialize")
+    win32com = ModuleType("win32com")
+    client = ModuleType("win32com.client")
+    client.DispatchEx = lambda name: fake_word
+    win32com.client = client
+    monkeypatch.setitem(sys.modules, "pythoncom", pythoncom)
+    monkeypatch.setitem(sys.modules, "win32com", win32com)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+
+    update_word_fields([path])
+
+    assert com_calls == ["initialize", "uninitialize"]
+    assert fake_word.Visible is False
+    assert fake_word.DisplayAlerts == 0
+    assert fake_word.Documents.opened_paths == [str(path.resolve())]
+    assert fake_document.Fields.update_count == 1
+    assert fake_document.StoryRanges[0].Fields.update_count == 1
+    assert fake_document.saved
+    assert fake_document.closed
+    assert fake_word.quit_called
 
 
 def test_placeholder_format_filters() -> None:

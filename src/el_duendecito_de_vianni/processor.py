@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .config import AppConfig
 from .importer import find_export, import_export
+from .office import update_word_fields
 from .processed_store import ProcessedStore, file_sha256
 from .spreadsheet import read_employees
 from .templates import process_template_copy
@@ -128,6 +129,7 @@ class DocumentProcessor:
                     report.generated_documents.extend(str(p) for p in result.generated_files)
                     report.missing_placeholders.update(result.missing_placeholders)
                     report.skipped_files.extend(result.skipped_files)
+            update_word_fields(report.generated_documents)
             generated_relative = [Path(p).relative_to(temp_output) for p in report.generated_documents]
             if final_output.exists():
                 stamped = datetime.now(DR_TZ).strftime("%H%M%S")
